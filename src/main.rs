@@ -9,7 +9,7 @@ fn draw_multiline_text(text: &str, x: f32, y: f32, font_size: f32, color: Color)
 	}
 }
 
-#[macroquad::main("Mobius portal")]
+#[macroquad::main("Precalculation of 3D object")]
 async fn main() {
 	let texture: Texture2D = load_texture("watermark.png").await;
 	let mobius_precalculated = load_texture("texture.png").await;
@@ -57,7 +57,7 @@ async fn main() {
 	let mut first_inv = first.inverse() * second;
 	let mut second_inv = second.inverse() * first;
 
-	let mut show_help = true;
+	let mut show_help = false;
 
 	loop {
 		if is_key_pressed(KeyCode::H) {
@@ -135,8 +135,8 @@ async fn main() {
 
 		previous_mouse = mouse_pos;
 
-		set_default_camera();
-		profiler::profiler(profiler::ProfilerParams { fps_counter_pos: vec2(10.0, 10.0) });
+		// set_default_camera();
+		// profiler::profiler(profiler::ProfilerParams { fps_counter_pos: vec2(10.0, 10.0) });
 
 		next_frame().await
 	}

@@ -1,3 +1,5 @@
+pub fn mymin(a: f64, b: f64) -> f64 { if a < b { a } else { b } }
+
 pub mod option {
 	pub trait AnyOrBothWith {
 		type Inner;
@@ -28,39 +30,39 @@ pub mod option {
 
 #[macro_use]
 pub mod assert {
-    #[macro_export]
-    macro_rules! assert_between {
-        ($lt:expr, $val:expr, $gt:expr) => {{
-            if $val < $lt {
-                panic!("{} < {} violated with values {} < {}", stringify!($lt), stringify!($val), $lt, $val);
-            }
-            if $val >= $gt {
-                panic!("{} < {} violated with values {} < {}", stringify!($val), stringify!($gt), $val, $gt);
-            }
-        }};
-    }
+	#[macro_export]
+	macro_rules! assert_between {
+		($lt:expr, $val:expr, $gt:expr) => {{
+			if $val < $lt {
+				panic!("{} < {} violated with values {} < {}", stringify!($lt), stringify!($val), $lt, $val);
+			}
+			if $val >= $gt {
+				panic!("{} < {} violated with values {} < {}", stringify!($val), stringify!($gt), $val, $gt);
+			}
+		}};
+	}
 }
 
 pub mod numeric_methods {
 	pub trait FloatFunction {
-		fn calc(&self, x: f32) -> f32;
+		fn calc(&self, x: f64) -> f64;
 	}
 
 	pub struct Derivative<F>(pub F);
 
 	impl<F: FloatFunction> FloatFunction for Derivative<F> {
-		fn calc(&self, x: f32) -> f32 {
-			const H: f32 = 0.001;
+		fn calc(&self, x: f64) -> f64 {
+			const H: f64 = 0.001;
 			(self.0.calc(x + 2. * H) + 8. * self.0.calc(x + H) - 8. * self.0.calc(x - H) - self.0.calc(x - 2. * H))
 				/ (12. * H)
 		}
 	}
 
-	pub fn newton_1d<F, DF, XF>(f: &F, df: &DF, xf: XF, init: f32, max_iter: i32, eps: f32) -> Option<f32>
+	pub fn newton_1d<F, DF, XF>(f: &F, df: &DF, xf: XF, init: f64, max_iter: i32, eps: f64) -> Option<f64>
 	where
 		F: FloatFunction,
 		DF: FloatFunction,
-		XF: Fn(f32, f32) -> f32,
+		XF: Fn(f64, f64) -> f64,
 	{
 		let mut x = init;
 		for _ in 0..max_iter {
@@ -76,17 +78,17 @@ pub mod numeric_methods {
 }
 
 pub mod line {
-	use glam::{Mat3, Vec3};
+	use glam::{DMat3 as Mat3, DVec3 as Vec3};
 
 	pub struct Line1 {
-		pub o: f32,
-		pub d: f32,
+		pub o: f64,
+		pub d: f64,
 	}
 
 	impl Line1 {
-		pub fn from(&self, t: LinePosition) -> f32 { self.o + self.d * t.0 }
+		pub fn from(&self, t: LinePosition) -> f64 { self.o + self.d * t.0 }
 
-		pub fn to(&self, o: f32) -> LinePosition { LinePosition((o - self.o) / self.d) }
+		pub fn to(&self, o: f64) -> LinePosition { LinePosition((o - self.o) / self.d) }
 	}
 
 	#[derive(Debug, Clone)]
@@ -96,7 +98,7 @@ pub mod line {
 	}
 
 	#[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
-	pub struct LinePosition(pub f32);
+	pub struct LinePosition(pub f64);
 
 	impl Line3 {
 		pub fn from(&self, t: LinePosition) -> Vec3 { self.o + self.d * t.0 }
@@ -107,9 +109,9 @@ pub mod line {
 
 		pub fn to_dir(&self, d: Vec3) -> LinePosition { LinePosition(d.dot(self.d)) }
 
-		pub fn distance(&self, o: Vec3) -> f32 { (self.from(self.to(o)) - o).length() }
+		pub fn distance(&self, o: Vec3) -> f64 { (self.from(self.to(o)) - o).length() }
 
-		pub fn distance_skew_line(&self, other: &Line3) -> f32 {
+		pub fn distance_skew_line(&self, other: &Line3) -> f64 {
 			let v = self.d.cross(other.d);
 			(self.o - other.d).dot(v).abs() / v.length()
 		}
@@ -140,15 +142,15 @@ pub mod line {
 }
 
 pub mod angle {
-	use std::f32::consts::PI;
+	use std::f64::consts::PI;
 
 	use serde::{Deserialize, Serialize};
 
 	#[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Serialize, Deserialize)]
-	pub struct Degrees(pub f32);
+	pub struct Degrees(pub f64);
 
 	#[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Serialize, Deserialize)]
-	pub struct Radians(pub f32);
+	pub struct Radians(pub f64);
 
 	impl From<Degrees> for Radians {
 		fn from(degrees: Degrees) -> Radians { Radians(degrees.0 / 180. * PI) }
@@ -158,7 +160,7 @@ pub mod angle {
 		fn from(radians: Radians) -> Degrees { Degrees(radians.0 / PI * 180.) }
 	}
 
-	pub fn clamp_mod(a: f32, max: f32) -> f32 { (max + a % max) % max }
+	pub fn clamp_mod(a: f64, max: f64) -> f64 { (max + a % max) % max }
 
 	pub fn clamp_angle(angle: Radians) -> Radians { Radians(clamp_mod(angle.0, 2. * PI)) }
 
@@ -181,7 +183,7 @@ pub mod angle {
 				None
 			} else {
 				let mut output = self.to;
-				output.0 *= self.current as f32 / self.count as f32;
+				output.0 *= self.current as f64 / self.count as f64;
 				self.current += 1;
 				Some(output)
 			}
@@ -213,33 +215,29 @@ pub mod quadratic_equation {
 			}
 		}
 
-        pub fn filter_map<F: Fn(T) -> Option<Y>, Y>(self, f: F) -> Roots<Y> {
-            use Roots::*;
-            match self {
-                Two(a, b) => if let Some(a) = f(a) {
-                    if let Some(b) = f(b) {
-                        Two(a, b)
-                    } else {
-                        One(a)
-                    }
-                } else {
-                    if let Some(b) = f(b) {
-                        One(b)
-                    } else {
-                        Zero
-                    }
-                },
-                One(a) => if let Some(a) = f(a) {
-                    One(a)
-                } else {
-                    Zero
-                },
-                Zero => Zero,
-            }
-        }
+		pub fn filter_map<F: Fn(T) -> Option<Y>, Y>(self, f: F) -> Roots<Y> {
+			use Roots::*;
+			match self {
+				Two(a, b) => {
+					if let Some(a) = f(a) {
+						if let Some(b) = f(b) { Two(a, b) } else { One(a) }
+					} else {
+						if let Some(b) = f(b) { One(b) } else { Zero }
+					}
+				},
+				One(a) => {
+					if let Some(a) = f(a) {
+						One(a)
+					} else {
+						Zero
+					}
+				},
+				Zero => Zero,
+			}
+		}
 	}
 
-	pub fn solve_quadratic_equation(a: f32, b: f32, c: f32) -> Roots<f32> {
+	pub fn solve_quadratic_equation(a: f64, b: f64, c: f64) -> Roots<f64> {
 		use Roots::*;
 		let d = b * b - 4.0 * a * c;
 		if d < 0.0 {
@@ -256,8 +254,9 @@ pub mod quadratic_equation {
 }
 
 pub mod sphere {
-	use std::f32::consts::PI;
-use glam::Vec3;
+	use std::f64::consts::PI;
+
+	use glam::DVec3 as Vec3;
 	use serde::{Deserialize, Serialize};
 
 	use crate::{angle::Radians, line::*, quadratic_equation::*};
@@ -275,11 +274,11 @@ use glam::Vec3;
 	#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 	pub struct Sph3 {
 		pub angles: Angles3,
-		pub r: f32,
+		pub r: f64,
 	}
 
 	impl Sph3 {
-		pub fn new(alpha: Radians, beta: Radians, r: f32) -> Self { Sph3 { angles: Angles3::new(alpha, beta), r } }
+		pub fn new(alpha: Radians, beta: Radians, r: f64) -> Self { Sph3 { angles: Angles3::new(alpha, beta), r } }
 	}
 
 	impl From<Vec3> for Angles3 {
@@ -305,7 +304,7 @@ use glam::Vec3;
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	pub struct Sphere3 {
 		pub pos: Vec3,
-		pub r: f32,
+		pub r: f64,
 	}
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,7 +326,7 @@ use glam::Vec3;
 
 		pub fn from(&self, pos: Angles3) -> Vec3 { self.pos + Vec3::from(pos) * self.r }
 
-        pub fn to(&self, pos: Vec3) -> Angles3 { Angles3::from(pos - self.pos) }
+		pub fn to(&self, pos: Vec3) -> Angles3 { Angles3::from(pos - self.pos) }
 
 		pub fn from_line(&self, line: &SphereLine3) -> Line3 {
 			let o = self.from(line.o.clone());
@@ -347,51 +346,52 @@ use glam::Vec3;
 		}
 	}
 
-    #[cfg(test)]
-    mod tests {
-        use glam::vec3;
-        use super::*;
-    
-        #[test]
-        fn angles() {
-            fn test_vec3(input: Vec3) {
-                let sph3 = Sph3::from(input);
-                let new_input = Vec3::from(sph3);
-                if !approx::abs_diff_eq!((new_input-input).length(), 0., epsilon = 0.01) {
-                    dbg!(input, sph3, new_input);
-                    panic!();
-                }
-                assert!(sph3.r >= 0.);
-                assert_between!(0., sph3.angles.alpha.0, 2. * PI);
-                assert_between!(0., sph3.angles.beta.0, PI);
-            }
+	#[cfg(test)]
+	mod tests {
+		use glam::DVec3 as Vec3;
 
-            test_vec3(vec3(1., 0., 0.));
-            test_vec3(vec3(0., 1., 0.));
-            test_vec3(vec3(0., 0., 1.));
-            test_vec3(vec3(1., 1., 0.));
-            test_vec3(vec3(0., 1., 1.));
-            test_vec3(vec3(1., 0., 1.));
-            test_vec3(vec3(1., 1., 1.));
+		use super::*;
 
-            test_vec3(vec3(20., 3., 10.));
-            test_vec3(vec3(-20., 3., 10.));
-            test_vec3(vec3(20., -3., 10.));
-            test_vec3(vec3(20., 3., -10.));
-            test_vec3(vec3(-20., -3., 10.));
-            test_vec3(vec3(20., -3., -10.));
-            test_vec3(vec3(-20., 3., -10.));
-            test_vec3(vec3(-20., -3., -10.));
+		#[test]
+		fn angles() {
+			fn test_vec3(input: Vec3) {
+				let sph3 = Sph3::from(input);
+				let new_input = Vec3::from(sph3);
+				if !approx::abs_diff_eq!((new_input - input).length(), 0., epsilon = 0.01) {
+					dbg!(input, sph3, new_input);
+					panic!();
+				}
+				assert!(sph3.r >= 0.);
+				assert_between!(0., sph3.angles.alpha.0, 2. * PI);
+				assert_between!(0., sph3.angles.beta.0, PI);
+			}
 
-            test_vec3(vec3(11., -103., 0.));
-        }
-    }
+			test_vec3(Vec3::new(1., 0., 0.));
+			test_vec3(Vec3::new(0., 1., 0.));
+			test_vec3(Vec3::new(0., 0., 1.));
+			test_vec3(Vec3::new(1., 1., 0.));
+			test_vec3(Vec3::new(0., 1., 1.));
+			test_vec3(Vec3::new(1., 0., 1.));
+			test_vec3(Vec3::new(1., 1., 1.));
+
+			test_vec3(Vec3::new(20., 3., 10.));
+			test_vec3(Vec3::new(-20., 3., 10.));
+			test_vec3(Vec3::new(20., -3., 10.));
+			test_vec3(Vec3::new(20., 3., -10.));
+			test_vec3(Vec3::new(-20., -3., 10.));
+			test_vec3(Vec3::new(20., -3., -10.));
+			test_vec3(Vec3::new(-20., 3., -10.));
+			test_vec3(Vec3::new(-20., -3., -10.));
+
+			test_vec3(Vec3::new(11., -103., 0.));
+		}
+	}
 }
 
 pub mod image {
 	use std::{fs::File, io::BufWriter, path::Path};
 
-	use glam::Vec2;
+	use glam::DVec2 as Vec2;
 
 	pub struct ImageIterator {
 		x: usize,
@@ -408,8 +408,8 @@ pub mod image {
 				return None;
 			}
 
-			let min = std::cmp::min(self.w, self.h) as f32;
-			let to_return = (self.x, self.y, (Vec2::new(self.x as f32, self.y as f32) / min * 2. - Vec2::new(1., 1.)));
+			let min = std::cmp::min(self.w, self.h) as f64;
+			let to_return = (self.x, self.y, (Vec2::new(self.x as f64, self.y as f64) / min * 2. - Vec2::new(1., 1.)));
 
 			self.x += 1;
 			if self.x == self.w {
@@ -454,14 +454,14 @@ pub mod image {
 }
 
 pub mod cam {
-	use glam::{Mat3, Vec2, Vec3};
+	use glam::{DMat3 as Mat3, DVec2 as Vec2, DVec3 as Vec3};
 
 	use crate::{angle::Radians, line::*};
 
 	pub struct Cam {
 		crd: Mat3,
 		pos: Vec3,
-		view: f32,
+		view: f64,
 	}
 
 	impl Cam {
@@ -485,13 +485,13 @@ pub mod cam {
 }
 
 pub mod mobius {
-	use std::io::Write;
+	use std::{f64::consts::PI, io::Write};
 
-	use glam::Vec3;
-	use indicatif::ProgressBar;
+	use glam::DVec3 as Vec3;
+	use indicatif::{ProgressBar, ProgressStyle};
 	use serde::{Deserialize, Serialize};
 
-	use crate::{angle::*, line::*, numeric_methods::*, quadratic_equation::Roots, sphere::*};
+	use crate::{angle::*, line::*, mymin, numeric_methods::*, quadratic_equation::Roots, sphere::*};
 
 	pub fn mobius_ray(u: Radians) -> Line3 {
 		let u = u.0;
@@ -504,8 +504,8 @@ pub mod mobius {
 
 	#[derive(Debug, Clone)]
 	pub struct ApproachMobiusResult {
-		pub distance: f32,
-		pub cost: f32,
+		pub distance: f64,
+		pub cost: f64,
 		pub t_line: LinePosition,
 		pub t_mobius: LinePosition,
 	}
@@ -515,7 +515,17 @@ pub mod mobius {
 
 		let (t_line, t_mobius) = ray.nearest_points_to_skew_line(&mray);
 
-		let distance = ray.distance_skew_line(&mray);
+		let up = mray.from(LinePosition(1.));
+		let down = mray.from(LinePosition(-1.));
+
+		let t_up = ray.to(up);
+		let t_down = ray.to(down);
+
+		let distance = if t_mobius.0.abs() < 1. {
+			(mray.from(t_mobius) - ray.from(t_line)).length()
+		} else {
+			mymin((up - ray.from(t_up)).length(), (down - ray.from(t_down)).length())
+		};
 
 		let cost = {
 			let result = distance;
@@ -547,7 +557,7 @@ pub mod mobius {
 		}
 
 		impl FloatFunction for RayToMobius<'_> {
-			fn calc(&self, u: f32) -> f32 { approach_mobius(Radians(u), self.ray).cost }
+			fn calc(&self, u: f64) -> f64 { approach_mobius(Radians(u), self.ray).cost }
 		}
 
 		newton_1d(
@@ -555,36 +565,46 @@ pub mod mobius {
 			&Derivative(RayToMobius { ray }),
 			|x, dx| clamp_angle(Radians(x + dx)).0,
 			u.0,
-			20,
-			5e-5,
+			30,
+			5e-4,
 		)
 		.map(|u| Radians(u))
 		.map(|best_u| Approx { best_approach: approach_mobius(best_u, &ray), best_u })
 	}
 
 	pub fn calc_mobius_everywhere(ray: &Line3, count: usize) -> Roots<Radians> {
-		let mut roots: Vec<Radians> = Vec::new();
-		let mut add_root = |new_root: Radians| {
-			if !roots.iter().any(|r| (r.0 - new_root.0).abs() < 1e-5) {
-				roots.push(new_root);
+		let mut roots: Vec<(Radians, f64)> = Vec::new();
+		let mut add_root = |new_root: Radians, distance: f64| {
+			if let Some(pos) = roots.iter().position(|r| (r.0.0 - new_root.0).abs() / (2. * PI) < 7e-3) {
+				if roots[pos].1 > distance {
+					roots[pos] = (new_root, distance);
+				}
+			} else {
+				roots.push((new_root, distance));
 			}
 		};
 
 		for u in iter_2pi(count) {
+			// let approx = approach_mobius(u, ray);
+			// if approx.distance * (count as f64) < 2. && approx.t_mobius.0.abs() < 1. {
+			// 	assert_between!(0., approx.t_line.0, 1.);
+			// 	add_root(u);
+			// }
 			if let Some(approx) = calc_mobius_from(ray, u) {
 				if approx.best_approach.t_mobius.0.abs() < 1. {
-					add_root(approx.best_u);
+					assert_between!(0., approx.best_approach.t_line.0, 1.);
+					add_root(approx.best_u, approx.best_approach.distance);
 				}
 			}
 		}
 
 		match roots[..] {
 			[] => Roots::Zero,
-			[a] => Roots::One(a),
-			[a, b] => Roots::Two(a, b),
-			[a, b, ..] => Roots::Two(a, b),
+			[a] => Roots::One(a.0),
+			[a, b] => Roots::Two(a.0, b.0),
+			[a, b, ..] => Roots::Two(a.0, b.0),
 			_ => panic!(
-				"Mobius band must has maximum two intersections with ray. This violated with u's = {:?} and ray = {:?}",
+				"Mobius band must has maximum two intersections with ray. This violated with u's = {:#?} and ray = {:?}",
 				roots, ray
 			),
 		}
@@ -596,13 +616,12 @@ pub mod mobius {
 		pub solved_points: Vec<(SphereLine3, Roots<Radians>)>,
 	}
 
-	pub fn roots_distance<T: Copy, F: Fn(T, T) -> f32>(
+	pub fn roots_distance<T: Copy, F: Fn(T, T) -> f64>(
 		should_be: Roots<T>,
 		actual: Roots<T>,
 		f: F,
-		extra_root_penalty: f32,
-	) -> f32 {
-		fn mymin(a: f32, b: f32) -> f32 { if a < b { a } else { b } }
+		extra_root_penalty: f64,
+	) -> f64 {
 		match should_be {
 			Roots::Zero => match actual {
 				Roots::Zero => 0.,
@@ -625,43 +644,49 @@ pub mod mobius {
 	impl MobiusPoints {
 		pub fn sphere() -> Sphere3 {
 			// Mobius strip is fully covered by this sphere
-			Sphere3 { pos: Vec3::new(0., 0., 0.), r: 1.5 }
+			Sphere3 { pos: Vec3::new(0., 0., 0.), r: 1.55 }
 		}
 
 		pub fn calc(count: usize) -> Self {
-            fn intersect_cylinder(ray: &Line3) -> Roots<Radians> {
-                let v = ray.d;
-                let p = ray.o;
-                let d = Vec3::new(0., 1., 0.);
-                let r = 0.5;
+			fn intersect_cylinder(ray: &Line3) -> Roots<Radians> {
+				let v = ray.d;
+				let p = ray.o;
+				let d = Vec3::new(0., 1., 0.);
+				let r = 0.5;
 
-                let vv = v.dot(v);
-                let pp = p.dot(p);
-                let dd = d.dot(d);
+				let vv = v.dot(v);
+				let pp = p.dot(p);
+				let dd = d.dot(d);
 
-                let dv = d.dot(v);
-                let dp = d.dot(p);
-                let pv = p.dot(v);
+				let dv = d.dot(v);
+				let dp = d.dot(p);
+				let pv = p.dot(v);
 
-                let a = dd * vv - dv * dv;
-                let b = 2. * (dd * pv - dp * dv);
-                let c = dd * pp - dp * dp - r * r * dd;
+				let a = dd * vv - dv * dv;
+				let b = 2. * (dd * pv - dp * dv);
+				let c = dd * pp - dp * dp - r * r * dd;
 
-                crate::quadratic_equation::solve_quadratic_equation(a, b, c).filter_map(|t| {
-                    Some(t).filter(|t| {
-                        let pos = ray.from(LinePosition(*t));
-                        pos.y.abs() < 0.4
-                    }).map(|t| Radians(t))
-                })
-            }
+				crate::quadratic_equation::solve_quadratic_equation(a, b, c).filter_map(|t| {
+					Some(t)
+						.filter(|t| {
+							let pos = ray.from(LinePosition(*t));
+							pos.y.abs() < 0.4
+						})
+						.map(|t| Radians(t))
+				})
+			}
 
 			let sphere = Self::sphere();
 			let mut solved_points = Vec::new();
-			let bar = ProgressBar::new(count as u64);
+			let bar =
+				ProgressBar::new((count * count) as u64).with_style(ProgressStyle::default_bar().template(
+					"[elapsed: {elapsed_precise:>8} | remaining: {eta_precise:>8} | {percent:>3}%] {wide_bar}",
+				));
 			for alpha1 in iter_2pi(count) {
-				bar.inc(1);
-				std::io::stdout().flush().unwrap();
 				for beta1 in iter_pi(count) {
+					bar.inc(1);
+					bar.tick();
+					std::io::stdout().flush().unwrap();
 					let o = Angles3::new(alpha1, beta1);
 					for alpha2 in iter_2pi(count) {
 						for beta2 in iter_pi(count) {
@@ -669,12 +694,13 @@ pub mod mobius {
 							let sphere_line = SphereLine3 { o, od };
 							let ray = sphere.from_line(&sphere_line);
 							let roots = calc_mobius_everywhere(&ray, 30);
-                            // let roots = intersect_cylinder(&ray);
+							// let roots = intersect_cylinder(&ray);
 							solved_points.push((sphere_line, roots));
 						}
 					}
 				}
 			}
+			bar.finish();
 			Self { sphere, solved_points }
 		}
 
@@ -689,13 +715,13 @@ pub mod mobius {
 			file.write_all(&bincode::serialize(&self).unwrap()).unwrap();
 		}
 
-		pub fn distance<F: Fn(&SphereLine3) -> Roots<Radians>>(&self, f: F) -> f32 {
+		pub fn distance<F: Fn(&SphereLine3) -> Roots<Radians>>(&self, f: F) -> f64 {
 			let mut sum: f64 = 0.;
 			for (line, should_be) in &self.solved_points {
 				let actual = f(line);
 				sum += roots_distance(*should_be, actual, |a, b| (a.0 - b.0).abs(), 30.) as f64;
 			}
-			sum as f32
+			sum as f64
 		}
 	}
 }

@@ -570,7 +570,7 @@ vec3 intersectScene(Ray r) {
             // }
             // current_color = color(hits.o.alpha / (2. * PI), hits.o.beta / PI, 0.);
             // current_color = color(hits.od.alpha / (2. * PI), hits.od.beta / PI, 0.);
-            int counti = 30;
+            int counti = 40;
             float count = float(counti);
 
             float alpha1 = hits.o.alpha / (2. * PI);
@@ -582,6 +582,11 @@ vec3 intersectScene(Ray r) {
             int beta1i = simplemod(int(beta1 * count), counti);
             int alpha2i = simplemod(int(alpha2 * count), counti);
             int beta2i = simplemod(int(beta2 * count), counti);
+
+            // alpha1i = alpha2i;
+            // beta1i = beta2i;
+            // alpha2i = 0;
+            // beta2i = 0;
 
             int xi = alpha1i * counti + alpha2i;
             int yi = beta1i * counti + beta2i;
@@ -612,14 +617,14 @@ vec3 intersectScene(Ray r) {
         p.repr.pos.z = size;
         hitp = intersectPlane(r, p);
         if (hitp.hit && abs(hitp.u) < size && abs(hitp.v) < size && hitp.t < current_t) {
-            current_color = addNormalToColor(gridColor(color(0.6, 0.2, 0.2), vec2(hitp.u, hitp.v) * scale), hitp.n, r.d);
+            current_color = addNormalToColor(gridColor(color(0.6, 0.6, 0.6), vec2(hitp.u, hitp.v) * scale), hitp.n, r.d);
             current_t = hitp.t;
         }
 
         p.repr.pos.z = -size;
         hitp = intersectPlane(r, p);
         if (hitp.hit && abs(hitp.u) < size && abs(hitp.v) < size && hitp.t < current_t) {
-            current_color = addNormalToColor(gridColor(color(0.6, 0.2, 0.6), vec2(hitp.u, hitp.v) * scale), hitp.n, r.d);
+            current_color = addNormalToColor(gridColor(color(0.6, 0.6, 0.6), vec2(hitp.u, hitp.v) * scale), hitp.n, r.d);
             current_t = hitp.t;
         }
 
@@ -630,18 +635,19 @@ vec3 intersectScene(Ray r) {
         p.repr.pos.x = size;
         hitp = intersectPlane(r, p);
         if (hitp.hit && abs(hitp.u) < size && abs(hitp.v) < size && hitp.t < current_t) {
-            current_color = color(0.2, 0.6, 0.2);
+            current_color = color(0.6, 0.6, 0.6);
             vec3 new_color = gridColor(current_color, vec2(hitp.u, hitp.v) * scale);
-            current_color = (current_color*2. + new_color)/3.;
+            // current_color = (current_color*2. + new_color)/3.;
+            current_color = new_color;
             current_color = addNormalToColor(current_color, hitp.n, r.d);
-            current_color *= texture2D(Texture, (vec2(-hitp.u, -hitp.v) + vec2(size, size))/(size * 2.)).rgb;
+            // current_color *= texture2D(Texture, (vec2(-hitp.u, -hitp.v) + vec2(size, size))/(size * 2.)).rgb;
             current_t = hitp.t;
         }
 
         p.repr.pos.x = -size;
         hitp = intersectPlane(r, p);
         if (hitp.hit && abs(hitp.u) < size && abs(hitp.v) < size && hitp.t < current_t) {
-            current_color = addNormalToColor(gridColor(color(0.6, 0.6, 0.2), vec2(hitp.u, hitp.v) * scale), hitp.n, r.d);
+            current_color = addNormalToColor(gridColor(color(0.6, 0.6, 0.6), vec2(hitp.u, hitp.v) * scale), hitp.n, r.d);
             current_t = hitp.t;
         }
 
@@ -660,7 +666,7 @@ vec3 intersectScene(Ray r) {
         p.repr.pos.y = -size;
         hitp = intersectPlane(r, p);
         if (hitp.hit && abs(hitp.u) < size && abs(hitp.v) < size && hitp.t < current_t) {
-            current_color = addNormalToColor(gridColor(color(0.2, 0.2, 0.6), vec2(hitp.u, hitp.v) * scale), hitp.n, r.d);
+            current_color = addNormalToColor(gridColor(color(0.6, 0.6, 0.6), vec2(hitp.u, hitp.v) * scale), hitp.n, r.d);
             current_t = hitp.t;
         }
 
