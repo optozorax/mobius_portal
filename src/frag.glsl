@@ -257,38 +257,29 @@ vec3 mobiusD(float u) {
     return vec3(cos(u/2.)*cos(u), sin(u/2.), cos(u/2.)*sin(u))/2.; // mobius
 }
 
-vec3 mobiusStep(float u, Ray r) {
-    Ray m = Ray(mobiusO(u), mobiusD(u));
+float mobiusStep(float u, Ray r) {
+    float cosu = cos(u);
+    float sinu = sin(u);
+    float cosu2 = cos(u/2.);
+    float sinu2 = sin(u/2.);
+
+    Ray m = Ray(vec3(cosu, 0., sinu), vec3(cosu2 * cosu, sinu2, cosu2 * sinu)/2.);
+
     vec3 n = cross(m.d, r.d);
     vec3 n2 = cross(r.d, n);
     vec3 p = m.o - r.o;
     float t_mobius_middle = -dot(p, n2)/dot(m.d, n2);
 
     if (abs(t_mobius_middle) < 1.) {
-        float distance = abs(dot(p, n)) / length(n);
-
-        vec3 n1 = cross(m.d, n);
-        float t_line_middle = dot(p, n1)/dot(r.d, n1);
-
-        return vec3(distance, t_mobius_middle, t_line_middle); // distance, v, t
+        return abs(dot(p, n)) / length(n);
     } else {
-        float t_up_mobius = 1.;
-        float t_down_mobius = -1.;
+        vec3 up = m.o + m.d;
+        vec3 down = m.o - m.d;
 
-        vec3 up = m.o + m.d * t_up_mobius;
-        vec3 down = m.o + m.d * t_down_mobius;
-
-        float t_up = to_line(r, up);
-        float t_down = to_line(r, down);
-
-        float distance_up = length(up - from_line(r, t_up));
-        float distance_down = length(down - from_line(r, t_down));
-
-        if (distance_up < distance_down) {
-            return vec3(distance_up, t_up_mobius, t_up);
-        } else {
-            return vec3(distance_down, t_down_mobius, t_down);
-        }
+        return min(
+            length(up - from_line(r, to_line(r, up))), 
+            length(down - from_line(r, to_line(r, down)))
+        );
     }
 }
 
@@ -329,7 +320,7 @@ struct MobiusIntersect {
 };
 
 float clampmod(float a, float max) {
-    a = max + mod(a, max);
+    // a = max + mod(a, max);
     if (a < 0.) {
         a += max;
     }
@@ -349,16 +340,17 @@ struct SearchResult {
     float v;
 };
 
-SearchResult findBestApprox(float u, Ray r, float eps_newton, SearchResult best) {
+SearchResult findBestApprox(float u, Ray r, SearchResult best) {
     float eps_der = 0.00005;
+    float eps_newton = 0.0001;
 
-    vec3 step = mobiusStep(u, r);
-    for (int k = 0; k < 5; k++) {
+    float step = mobiusStep(u, r);
+    for (int k = 0; k < 10; k++) {
         if (step.x < eps_newton) {
             break;
         }
-        float fx = step.x;
-        float fx1 = mobiusStep(u + eps_der, r).x;
+        float fx = step;
+        float fx1 = mobiusStep(u + eps_der, r);
         float du = -fx/(fx1 - fx)*eps_der;
         u = clampangle(u + du);
         step = mobiusStep(u, r);
@@ -367,8 +359,9 @@ SearchResult findBestApprox(float u, Ray r, float eps_newton, SearchResult best)
         }
     }
 
-    if (step.x < eps_newton && abs(step.y) < 1.) {
-        return SearchResult(step.z, u, step.y);    
+    if (step < eps_newton) {
+        vec2 ts = mobius_step_ts(u, r);
+        return SearchResult(ts.y, u, ts.x);    
     } else {
         return SearchResult(-1., 0., 0.);
     }
@@ -465,22 +458,22 @@ SearchResult findBest(Ray r) {
     SearchResult best = SearchResult(-1., 0., 0.);
 
     if (intersect_mobius_sphere(r)) {
-        best = updateBestApprox(best, findBestApprox(0., r, 0.0001, best));
-        best = updateBestApprox(best, findBestApprox(PI, r, 0.0001, best));
+        best = updateBestApprox(best, findBestApprox(0., r, best));
+        best = updateBestApprox(best, findBestApprox(PI, r, best));
         for (int i = 0; i < 2; i++) {
             float u = float(i*2 + 1)/4. * 2. * PI;
-            best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
+            best = updateBestApprox(best, findBestApprox(u, r, best));
         }
         for (int i = 0; i < 4; i++) {
             float u = float(i*2 + 1)/8. * 2. * PI;
-            best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
+            best = updateBestApprox(best, findBestApprox(u, r, best));
         }
         if (best.t < 0.) {
             return best;
         }
         for (int i = -1; i < 1; i++) {
             float u = float(i*2 + 1)/16. * 2. * PI;
-            best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
+            best = updateBestApprox(best, findBestApprox(u, r, best));
         }
     }
     return best;
