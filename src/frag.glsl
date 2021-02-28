@@ -239,7 +239,7 @@ vec3 unprojectCrd(crd3 crd, vec3 d) {
     return crd.i * d.x + crd.j * d.y + crd.k * d.z + crd.pos;
 }
 
-vec2 twoLinesNearestPoints(Ray a, Ray b) {
+vec2 two_lines_nearest_points(Ray a, Ray b) {
     vec3 n = cross(a.d, b.d);
     vec3 n1 = cross(a.d, n);
     vec3 n2 = cross(b.d, n);
@@ -247,9 +247,6 @@ vec2 twoLinesNearestPoints(Ray a, Ray b) {
         dot(b.o-a.o, n2)/dot(a.d, n2),
         dot(a.o-b.o, n1)/dot(b.d, n1)
     );
-    // crd3 crd = crd3(a.d, b.d, cross(a.d, b.d), a.o);
-    // vec3 pos = projectCrd(crd, b.o);
-    // return vec2(pos.x, -pos.y);
 }
 
 vec3 mobiusO(float u) {
@@ -262,15 +259,18 @@ vec3 mobiusD(float u) {
 
 vec3 mobiusStep(float u, Ray r) {
     Ray m = Ray(mobiusO(u), mobiusD(u));
-    vec2 ts = twoLinesNearestPoints(m, r);
+    vec3 n = cross(m.d, r.d);
+    vec3 n2 = cross(r.d, n);
+    vec3 p = m.o - r.o;
+    float t_mobius_middle = -dot(p, n2)/dot(m.d, n2);
 
-    if (abs(ts.x) < 1.) {
-        vec3 lnearest = m.o + m.d * ts.x;
-        vec3 rnearest = r.o + r.d * ts.y;
-        
-        float distance = length(lnearest - rnearest);
+    if (abs(t_mobius_middle) < 1.) {
+        float distance = abs(dot(p, n)) / length(n);
 
-        return vec3(distance, ts.x, ts.y); // distance, v, t
+        vec3 n1 = cross(m.d, n);
+        float t_line_middle = dot(p, n1)/dot(r.d, n1);
+
+        return vec3(distance, t_mobius_middle, t_line_middle); // distance, v, t
     } else {
         float t_up_mobius = 1.;
         float t_down_mobius = -1.;
@@ -290,6 +290,10 @@ vec3 mobiusStep(float u, Ray r) {
             return vec3(distance_down, t_down_mobius, t_down);
         }
     }
+}
+
+vec2 mobius_step_ts(float u, Ray r) {
+    return two_lines_nearest_points(Ray(mobiusO(u), mobiusD(u)), r);
 }
 
 vec3 mobius_d1(float v, float u) {
@@ -353,7 +357,9 @@ SearchResult findBestApprox(float u, Ray r, float eps_newton, SearchResult best)
         if (step.x < eps_newton) {
             break;
         }
-        float du = -step.x/(mobiusStep(u + eps_der, r).x - step.x)*eps_der;
+        float fx = step.x;
+        float fx1 = mobiusStep(u + eps_der, r).x;
+        float du = -fx/(fx1 - fx)*eps_der;
         u = clampangle(u + du);
         step = mobiusStep(u, r);
         if (best.t > 0. && abs(u-best.u) < 0.01) {
@@ -478,38 +484,6 @@ SearchResult findBest(Ray r) {
         }
     }
     return best;
-
-    // vec2 best_value = get_best_init_value_ray(r);
-    // if (best_value.x >= 0.) {
-    //     best = updateBestApprox(best, findBestApprox(best_value.x, r, 0.001, best));
-    //     best = updateBestApprox(best, findBestApprox(best_value.y, r, 0.001, best));
-    //     return best;
-    // } else {
-    //     return best;
-    // }
-
-    // float previousDist = MAX_DIST;
-    // float t = 0.;
-    // for(int i = 0; i < MAX_STEPS; i++) {
-    //     vec3 pos = r.o + r.d * t;
-    //     float dist = GetDist(pos);
-
-    //     if (dist > previousDist) {
-    //         float u = atan(pos.z, pos.x);
-    //         best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
-    //         break;
-    //     }
-
-    //     if (abs(dist) < SURF_DIST) {
-    //         float u = atan(pos.z, pos.x);
-    //         best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
-    //         break;
-    //     }
-
-    //     t += dist;
-    //     previousDist = dist;
-    // }
-    // return best;
 }
 
 struct SphereIntersect {
