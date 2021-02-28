@@ -12,7 +12,7 @@ fn draw_multiline_text(text: &str, x: f32, y: f32, font_size: f32, color: Color)
 #[macroquad::main("Precalculation of 3D object")]
 async fn main() {
 	let texture: Texture2D = load_texture("watermark.png").await;
-	let mobius_precalculated = load_texture("texture.png").await;
+	let mobius_precalculated = load_texture("brute_force8.png").await;
 
 	let lens_material = load_material(LENS_VERTEX_SHADER, LENS_FRAGMENT_SHADER, MaterialParams {
 		textures: vec!["Mobius".to_string()],
@@ -135,8 +135,8 @@ async fn main() {
 
 		previous_mouse = mouse_pos;
 
-		// set_default_camera();
-		// profiler::profiler(profiler::ProfilerParams { fps_counter_pos: vec2(10.0, 10.0) });
+		set_default_camera();
+		profiler::profiler(profiler::ProfilerParams { fps_counter_pos: vec2(10.0, 10.0) });
 
 		next_frame().await
 	}

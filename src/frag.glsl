@@ -21,6 +21,10 @@ uniform sampler2D Mobius;
 #define PI acos(-1.)
 #define PI2 (PI/2)
 
+float round(float a) {
+    return floor(a + 0.5);
+}
+
 struct Ray
 {
     vec3 o;     // origin
@@ -92,6 +96,14 @@ struct QuadraticEquationResult {
     float x2;
 };
 
+float to_line(Ray line, vec3 pos) {
+    return dot(pos - line.o, line.d);
+}
+
+vec3 from_line(Ray line, float pos) {
+    return line.o + line.d * pos;
+}
+
 QuadraticEquationResult solve_quadratic_equation(float a, float b, float c) {
     float d = b*b - 4.*a*c;
     if (d < 0.0 || abs(a) < 1e-6) {
@@ -142,6 +154,64 @@ SphereLineIntersection intersect_sphere_line(Sphere s, Ray r) {
     }
 }
 
+int simplemod(int a, int mod) {
+    if (a > mod) {
+        a -= mod;
+    }
+    if (a < 0) {
+        a = mod + a;
+    }
+    return a;
+}
+
+int texture_counti = 8;
+float texture_count = 8.;
+
+float get_best_init_value_ipos(int alpha1i, int beta1i, int alpha2i, int beta2i) {
+    alpha1i = simplemod(alpha1i, texture_counti);
+    beta1i = simplemod(beta1i, texture_counti);
+    alpha2i = simplemod(alpha2i, texture_counti);
+    beta2i = simplemod(beta2i, texture_counti);
+
+    int xi = alpha1i * texture_counti + alpha2i;
+    int yi = beta1i * texture_counti + beta2i;
+
+    float x = float(xi) / (texture_count * texture_count);
+    float y = float(yi) / (texture_count * texture_count);
+
+    vec3 color = texture2D(Mobius, vec2(x, y)).rgb;
+
+    float value = (color.r + color.g * 256. + color.b * 256. * 256.) / (256. * 256.) * 2. * PI;
+
+    return value;
+}
+
+float get_best_init_value_angles(Angles3 o, Angles3 od, bool min) {
+    float alpha1 = o.alpha / (2. * PI);
+    float beta1 = o.beta / PI;
+    float alpha2 = od.alpha / (2. * PI);
+    float beta2 = od.beta / PI;
+
+    int alpha1i = int(round(alpha1 * texture_count));
+    int beta1i = int(round(beta1 * texture_count));
+    int alpha2i = int(round(alpha2 * texture_count));
+    int beta2i = int(round(beta2 * texture_count));
+
+    return get_best_init_value_ipos(alpha1i, beta1i, alpha2i, beta2i);
+}
+
+vec2 get_best_init_value_ray(Ray r) {
+    SphereLineIntersection hits = intersect_sphere_line(Sphere(vec3(0.), 1.55), r);
+    if (hits.is_some) {
+        return vec2(
+            get_best_init_value_angles(hits.o, hits.od, false),
+            get_best_init_value_angles(hits.od, hits.o, true)
+        );
+    } else {
+        return vec2(-1., -1.);
+    }
+}
+
 crd3 orthonormalize(crd3 a) {
     a.i = normalize(a.i);
     a.j = normalize(a.j);
@@ -170,9 +240,16 @@ vec3 unprojectCrd(crd3 crd, vec3 d) {
 }
 
 vec2 twoLinesNearestPoints(Ray a, Ray b) {
-    crd3 crd = crd3(a.d, b.d, cross(a.d, b.d), a.o);
-    vec3 pos = projectCrd(crd, b.o);
-    return vec2(pos.x, -pos.y);
+    vec3 n = cross(a.d, b.d);
+    vec3 n1 = cross(a.d, n);
+    vec3 n2 = cross(b.d, n);
+    return vec2(
+        dot(b.o-a.o, n2)/dot(a.d, n2),
+        dot(a.o-b.o, n1)/dot(b.d, n1)
+    );
+    // crd3 crd = crd3(a.d, b.d, cross(a.d, b.d), a.o);
+    // vec3 pos = projectCrd(crd, b.o);
+    // return vec2(pos.x, -pos.y);
 }
 
 vec3 mobiusO(float u) {
@@ -184,26 +261,35 @@ vec3 mobiusD(float u) {
 }
 
 vec3 mobiusStep(float u, Ray r) {
-    vec3 o = mobiusO(u);
-    vec3 d = mobiusD(u);
-    
-    Ray l = Ray(o, d);
-    vec2 ts = twoLinesNearestPoints(l, r);
+    Ray m = Ray(mobiusO(u), mobiusD(u));
+    vec2 ts = twoLinesNearestPoints(m, r);
 
-    vec3 lnearest = l.o + l.d * ts.x;
-    vec3 rnearest = r.o + r.d * ts.y;
-    
-    float distance = length(lnearest - rnearest);
+    if (abs(ts.x) < 1.) {
+        vec3 lnearest = m.o + m.d * ts.x;
+        vec3 rnearest = r.o + r.d * ts.y;
+        
+        float distance = length(lnearest - rnearest);
 
-    if (abs(ts.x) > 1.) {
-        distance *= 2. * abs(ts.x);
+        return vec3(distance, ts.x, ts.y); // distance, v, t
+    } else {
+        float t_up_mobius = 1.;
+        float t_down_mobius = -1.;
+
+        vec3 up = m.o + m.d * t_up_mobius;
+        vec3 down = m.o + m.d * t_down_mobius;
+
+        float t_up = to_line(r, up);
+        float t_down = to_line(r, down);
+
+        float distance_up = length(up - from_line(r, t_up));
+        float distance_down = length(down - from_line(r, t_down));
+
+        if (distance_up < distance_down) {
+            return vec3(distance_up, t_up_mobius, t_up);
+        } else {
+            return vec3(distance_down, t_down_mobius, t_down);
+        }
     }
-
-    if (ts.y < 0.) {
-        distance *= 4. * abs(ts.y);
-    }
-
-    return vec3(distance, ts.x, ts.y); // distance, v, t
 }
 
 vec3 mobius_d1(float v, float u) {
@@ -260,10 +346,10 @@ struct SearchResult {
 };
 
 SearchResult findBestApprox(float u, Ray r, float eps_newton, SearchResult best) {
-    float eps_der = 0.0001;
+    float eps_der = 0.00005;
 
     vec3 step = mobiusStep(u, r);
-    for (int k = 0; k < 10; k++) {
+    for (int k = 0; k < 5; k++) {
         if (step.x < eps_newton) {
             break;
         }
@@ -326,7 +412,7 @@ float GetDist(vec3 p) {
     float a = atan(p.x, p.z) + PI/2.; // polar angle between -pi and pi
     cp *= Rot(a * .5);
     cp.y = abs(cp.y) - .2;
-    float d1 = sdBox2d(cp, vec2(0.,.30));
+    float d1 = sdBox2d(cp, vec2(0.,.40));
     return d1 * 0.6;
 }
 
@@ -362,34 +448,68 @@ MobiusRayMarchingIntersect intersectMobiusRayMarching(Ray r) {
     }
 }
 
+bool intersect_mobius_sphere(Ray r) {
+    vec3 op = -r.o;
+    float b = dot(op, r.d);
+    float det = b * b - dot(op, op) + 2.4055; // 1.55²
+    return det >= 0.;
+}
+
 SearchResult findBest(Ray r) {
     SearchResult best = SearchResult(-1., 0., 0.);
 
-    float u = atan(r.o.z, r.o.x);
-    best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
-
-    float previousDist = MAX_DIST;
-    float t = 0.;
-    for(int i = 0; i < MAX_STEPS; i++) {
-        vec3 pos = r.o + r.d * t;
-        float dist = GetDist(pos);
-
-        if (dist > previousDist) {
-            float u = atan(pos.z, pos.x);
+    if (intersect_mobius_sphere(r)) {
+        best = updateBestApprox(best, findBestApprox(0., r, 0.0001, best));
+        best = updateBestApprox(best, findBestApprox(PI, r, 0.0001, best));
+        for (int i = 0; i < 2; i++) {
+            float u = float(i*2 + 1)/4. * 2. * PI;
             best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
-            break;
         }
-
-        if (abs(dist) < SURF_DIST) {
-            float u = atan(pos.z, pos.x);
+        for (int i = 0; i < 4; i++) {
+            float u = float(i*2 + 1)/8. * 2. * PI;
             best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
-            break;
         }
-
-        t += dist;
-        previousDist = dist;
+        if (best.t < 0.) {
+            return best;
+        }
+        for (int i = -1; i < 1; i++) {
+            float u = float(i*2 + 1)/16. * 2. * PI;
+            best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
+        }
     }
     return best;
+
+    // vec2 best_value = get_best_init_value_ray(r);
+    // if (best_value.x >= 0.) {
+    //     best = updateBestApprox(best, findBestApprox(best_value.x, r, 0.001, best));
+    //     best = updateBestApprox(best, findBestApprox(best_value.y, r, 0.001, best));
+    //     return best;
+    // } else {
+    //     return best;
+    // }
+
+    // float previousDist = MAX_DIST;
+    // float t = 0.;
+    // for(int i = 0; i < MAX_STEPS; i++) {
+    //     vec3 pos = r.o + r.d * t;
+    //     float dist = GetDist(pos);
+
+    //     if (dist > previousDist) {
+    //         float u = atan(pos.z, pos.x);
+    //         best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
+    //         break;
+    //     }
+
+    //     if (abs(dist) < SURF_DIST) {
+    //         float u = atan(pos.z, pos.x);
+    //         best = updateBestApprox(best, findBestApprox(u, r, 0.0001, best));
+    //         break;
+    //     }
+
+    //     t += dist;
+    //     previousDist = dist;
+    // }
+    // return best;
 }
 
 struct SphereIntersect {
@@ -484,16 +604,6 @@ vec3 mulCrd(mat4 matrix, vec3 vec) {
     return (matrix * vec4(vec, 1.)).xyz;
 }
 
-int simplemod(int a, int mod) {
-    if (a > mod) {
-        a -= mod;
-    }
-    if (a < 0) {
-        a = mod + a;
-    }
-    return a;
-}
-
 struct CylinderIntersectResult {
     bool is_some;
     vec3 color;
@@ -539,10 +649,6 @@ CylinderIntersectResult intersect_cylinder(Ray ray) {
     }
 }
 
-float round(float a) {
-    return floor(a + 0.5);
-}
-
 vec3 intersectScene(Ray r) {
     Plane p = Plane(crdDefault);
     float size = 4.5;
@@ -555,57 +661,6 @@ vec3 intersectScene(Ray r) {
     for (int i = 0; i < 100; ++i) {
         float current_t = 1e10;
         vec3 current_color = color(0.6, 0.6, 0.6);
-
-        SphereLineIntersection hits = intersect_sphere_line(Sphere(vec3(0.), 1.5), r);
-        if (hits.is_some) {
-            // float size = 0.05;
-            // float alpha_to_explore = 2. * PI - size;
-            // float beta_te_explore = PI / 2.;
-            // if (hits.o.alpha > alpha_to_explore && hits.o.alpha < alpha_to_explore + size) {
-            //     current_color = color(0.5, 0., 0.);
-            // } else if (hits.o.beta > beta_te_explore && hits.o.beta < beta_te_explore + size) {
-            //     current_color = color(0., 0.5, 0.);
-            // } else {
-            //     current_color = color(0., 0., 0.);
-            // }
-            // current_color = color(hits.o.alpha / (2. * PI), hits.o.beta / PI, 0.);
-            // current_color = color(hits.od.alpha / (2. * PI), hits.od.beta / PI, 0.);
-            int counti = 40;
-            float count = float(counti);
-
-            float alpha1 = hits.o.alpha / (2. * PI);
-            float beta1 = hits.o.beta / PI;
-            float alpha2 = hits.od.alpha / (2. * PI);
-            float beta2 = hits.od.beta / PI;
-
-            int alpha1i = simplemod(int(alpha1 * count), counti);
-            int beta1i = simplemod(int(beta1 * count), counti);
-            int alpha2i = simplemod(int(alpha2 * count), counti);
-            int beta2i = simplemod(int(beta2 * count), counti);
-
-            // alpha1i = alpha2i;
-            // beta1i = beta2i;
-            // alpha2i = 0;
-            // beta2i = 0;
-
-            int xi = alpha1i * counti + alpha2i;
-            int yi = beta1i * counti + beta2i;
-
-            float x = float(xi) / (count * count);
-            float y = float(yi) / (count * count);
-
-            current_t = 0.1;
-            // gray *= 0.4;
-
-            CylinderIntersectResult hitc = intersect_cylinder(Ray(hits.vo, hits.vod - hits.vo));
-            if (hitc.is_some) {
-                current_color = hitc.color;
-            } else {
-                current_color = vec3(0.);
-            }
-
-            current_color = texture2D(Mobius, vec2(x, y)).rgb;
-        }
 
         // SphereIntersect hits = intersectSphere(r);
         // if (hits.hit && hits.t < current_t) {
@@ -674,7 +729,13 @@ vec3 intersectScene(Ray r) {
         p.repr.j = crdDefault.j;
         p.repr.k = crdDefault.k;
 
-        return current_color * gray;
+        // MobiusIntersect hitmobius = intersectMobius2(Ray(mulCrd(first, r.o), mulDir(first, r.d)));
+        // if (hitmobius.hit && abs(hitmobius.v) < 1. && hitmobius.t < current_t) {
+        //     current_color = addNormalToColor(gridColor(color(0.6, 0.6, 0.6), vec2(hitmobius.u, hitmobius.v)), hitmobius.n, r.d);
+        //     current_t = hitmobius.t;
+        // }
+
+        // return current_color * gray;
 
         MobiusIntersect hit = intersectMobius2(Ray(mulCrd(first, r.o), mulDir(first, r.d)));
         MobiusIntersect hit2 = intersectMobius2(Ray(mulCrd(second, r.o), mulDir(second, r.d)));

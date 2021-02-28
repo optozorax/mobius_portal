@@ -28,6 +28,37 @@ pub mod option {
 	}
 }
 
+pub mod joined_by {
+	use std::fmt::{Display, Formatter};
+
+	pub struct Joined<I, By> {
+		elements: I,
+		by: By,
+	}
+
+	pub trait JoinedByTrait: Sized {
+		fn joined_by<By: Display>(self, by: By) -> Joined<Self, By>;
+	}
+
+	impl<I: Iterator<Item = T> + Clone, T: Display> JoinedByTrait for I {
+		fn joined_by<By: Display>(self, by: By) -> Joined<Self, By> { Joined { elements: self, by } }
+	}
+
+	impl<I: Iterator<Item = T> + Clone, T: Display, By: Display> Display for Joined<I, By> {
+		fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+			let mut first = true;
+			for i in self.elements.clone() {
+				if !first {
+					write!(f, "{}", self.by)?;
+				}
+				write!(f, "{}", i)?;
+				first = false;
+			}
+			Ok(())
+		}
+	}
+}
+
 #[macro_use]
 pub mod assert {
 	#[macro_export]
@@ -151,6 +182,10 @@ pub mod angle {
 
 	#[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Serialize, Deserialize)]
 	pub struct Radians(pub f64);
+
+	impl Radians {
+		pub fn normalize(self) -> f64 { self.0 / (2. * PI) }
+	}
 
 	impl From<Degrees> for Radians {
 		fn from(degrees: Degrees) -> Radians { Radians(degrees.0 / 180. * PI) }
@@ -485,13 +520,16 @@ pub mod cam {
 }
 
 pub mod mobius {
-	use std::{f64::consts::PI, io::Write};
+	use std::{collections::VecDeque, f64::consts::PI, io::Write};
 
 	use glam::DVec3 as Vec3;
 	use indicatif::{ProgressBar, ProgressStyle};
+	use rand::prelude::*;
 	use serde::{Deserialize, Serialize};
 
-	use crate::{angle::*, line::*, mymin, numeric_methods::*, quadratic_equation::Roots, sphere::*};
+	use crate::{
+		angle::*, image::Image, line::*, mymin, numeric_methods::*, option::*, quadratic_equation::Roots, sphere::*,
+	};
 
 	pub fn mobius_ray(u: Radians) -> Line3 {
 		let u = u.0;
@@ -505,7 +543,6 @@ pub mod mobius {
 	#[derive(Debug, Clone)]
 	pub struct ApproachMobiusResult {
 		pub distance: f64,
-		pub cost: f64,
 		pub t_line: LinePosition,
 		pub t_mobius: LinePosition,
 	}
@@ -513,42 +550,49 @@ pub mod mobius {
 	pub fn approach_mobius(u: Radians, ray: &Line3) -> ApproachMobiusResult {
 		let mray = mobius_ray(u);
 
-		let (t_line, t_mobius) = ray.nearest_points_to_skew_line(&mray);
+		let (t_skew_line, t_skew_mobius) = ray.nearest_points_to_skew_line(&mray);
 
-		let up = mray.from(LinePosition(1.));
-		let down = mray.from(LinePosition(-1.));
-
-		let t_up = ray.to(up);
-		let t_down = ray.to(down);
-
-		let distance = if t_mobius.0.abs() < 1. {
-			(mray.from(t_mobius) - ray.from(t_line)).length()
+		if t_skew_mobius.0.abs() < 1. {
+			let distance = (mray.from(t_skew_mobius) - ray.from(t_skew_line)).length();
+			ApproachMobiusResult { distance, t_mobius: t_skew_mobius, t_line: t_skew_line }
 		} else {
-			mymin((up - ray.from(t_up)).length(), (down - ray.from(t_down)).length())
-		};
+			let t_up_mobius = LinePosition(1.);
+			let t_down_mobius = LinePosition(-1.);
 
-		let cost = {
-			let result = distance;
-			// if t_mobius.0.abs() > 1. {
-			// 	result += 2. * t_mobius.0.abs();
-			// }
-			// if t_line.0 < 0. {
-			// 	result *= 4. * (1. + t_line.0.abs());
-			// };
-			result
-		};
+			let up = mray.from(t_up_mobius);
+			let down = mray.from(t_down_mobius);
 
-		ApproachMobiusResult { distance, cost, t_mobius, t_line }
+			let t_up = ray.to(up);
+			let t_down = ray.to(down);
+
+			let distance_up = (up - ray.from(t_up)).length();
+			let distance_down = (down - ray.from(t_down)).length();
+
+			if distance_up < distance_down {
+				ApproachMobiusResult { distance: distance_up, t_mobius: t_up_mobius, t_line: t_up }
+			} else {
+				ApproachMobiusResult { distance: distance_down, t_mobius: t_down_mobius, t_line: t_down }
+			}
+		}
 	}
 
+	#[derive(Clone, Debug)]
 	pub struct Approx {
 		pub best_approach: ApproachMobiusResult,
 		pub best_u: Radians,
 	}
 
-	// pub fn update_best_approx(best: Option<Approx>, new: Option<Approx>) -> Option<Approx> {
-	// 	best.any_or_both_with(new, |b, n| if n.best_approach.cost < b.best_approach.cost { n } else { b })
-	// }
+	pub fn update_best_approx(best: Option<Approx>, new: Option<Approx>) -> Option<Approx> {
+		best.any_or_both_with(new, |b, n| {
+			if n.best_approach.distance < b.best_approach.distance
+				&& n.best_approach.t_line.0 < b.best_approach.t_line.0
+			{
+				n
+			} else {
+				b
+			}
+		})
+	}
 
 	pub fn calc_mobius_from(ray: &Line3, u: Radians) -> Option<Approx> {
 		#[derive(Debug, Clone)]
@@ -557,7 +601,7 @@ pub mod mobius {
 		}
 
 		impl FloatFunction for RayToMobius<'_> {
-			fn calc(&self, u: f64) -> f64 { approach_mobius(Radians(u), self.ray).cost }
+			fn calc(&self, u: f64) -> f64 { approach_mobius(Radians(u), self.ray).distance }
 		}
 
 		newton_1d(
@@ -572,48 +616,37 @@ pub mod mobius {
 		.map(|best_u| Approx { best_approach: approach_mobius(best_u, &ray), best_u })
 	}
 
-	pub fn calc_mobius_everywhere(ray: &Line3, count: usize) -> Roots<Radians> {
-		let mut roots: Vec<(Radians, f64)> = Vec::new();
-		let mut add_root = |new_root: Radians, distance: f64| {
-			if let Some(pos) = roots.iter().position(|r| (r.0.0 - new_root.0).abs() / (2. * PI) < 7e-3) {
-				if roots[pos].1 > distance {
-					roots[pos] = (new_root, distance);
-				}
-			} else {
-				roots.push((new_root, distance));
-			}
-		};
+	pub fn calc_mobius_everywhere(ray: &Line3, count: usize) -> Option<Approx> {
+		// let mut best: Option<Approx> = None;
 
-		for u in iter_2pi(count) {
-			// let approx = approach_mobius(u, ray);
-			// if approx.distance * (count as f64) < 2. && approx.t_mobius.0.abs() < 1. {
-			// 	assert_between!(0., approx.t_line.0, 1.);
-			// 	add_root(u);
-			// }
-			if let Some(approx) = calc_mobius_from(ray, u) {
-				if approx.best_approach.t_mobius.0.abs() < 1. {
-					assert_between!(0., approx.best_approach.t_line.0, 1.);
-					add_root(approx.best_u, approx.best_approach.distance);
-				}
-			}
-		}
+		// for u in iter_2pi(count) {
+		// 	best = update_best_approx(calc_mobius_from(ray, u), best);
+		// }
 
-		match roots[..] {
-			[] => Roots::Zero,
-			[a] => Roots::One(a.0),
-			[a, b] => Roots::Two(a.0, b.0),
-			[a, b, ..] => Roots::Two(a.0, b.0),
-			_ => panic!(
-				"Mobius band must has maximum two intersections with ray. This violated with u's = {:#?} and ray = {:?}",
-				roots, ray
-			),
-		}
+		// best
+
+		use std::sync::{Arc, Mutex};
+		let best: Arc<Mutex<Option<Approx>>> = Arc::new(Mutex::new(None));
+		use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
+		(0..count)
+			.into_par_iter()
+			.map(|x| x as f64 / count as f64 * 2. * PI)
+			.for_each(|u| {
+				let getted = calc_mobius_from(ray, Radians(u));
+				let mut best = best.lock().unwrap();
+				*best = update_best_approx(getted, best.clone());
+			});
+
+		let x = best.lock().unwrap();
+		x.clone()
 	}
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	pub struct MobiusPoints {
+		pub count: usize,
 		pub sphere: Sphere3,
-		pub solved_points: Vec<(SphereLine3, Roots<Radians>)>,
+		pub solved_points: Vec<(SphereLine3, Option<Radians>)>,
 	}
 
 	pub fn roots_distance<T: Copy, F: Fn(T, T) -> f64>(
@@ -641,6 +674,24 @@ pub mod mobius {
 		}
 	}
 
+	pub fn options_distance<T: Copy, F: Fn(T, T) -> f64>(
+		should_be: Option<T>,
+		actual: Option<T>,
+		extra_root_penalty: f64,
+		f: F,
+	) -> f64 {
+		match should_be {
+			None => match actual {
+				None => 0.,
+				Some(..) => extra_root_penalty,
+			},
+			Some(a) => match actual {
+				None => extra_root_penalty,
+				Some(a1) => f(a, a1),
+			},
+		}
+	}
+
 	impl MobiusPoints {
 		pub fn sphere() -> Sphere3 {
 			// Mobius strip is fully covered by this sphere
@@ -648,34 +699,6 @@ pub mod mobius {
 		}
 
 		pub fn calc(count: usize) -> Self {
-			fn intersect_cylinder(ray: &Line3) -> Roots<Radians> {
-				let v = ray.d;
-				let p = ray.o;
-				let d = Vec3::new(0., 1., 0.);
-				let r = 0.5;
-
-				let vv = v.dot(v);
-				let pp = p.dot(p);
-				let dd = d.dot(d);
-
-				let dv = d.dot(v);
-				let dp = d.dot(p);
-				let pv = p.dot(v);
-
-				let a = dd * vv - dv * dv;
-				let b = 2. * (dd * pv - dp * dv);
-				let c = dd * pp - dp * dp - r * r * dd;
-
-				crate::quadratic_equation::solve_quadratic_equation(a, b, c).filter_map(|t| {
-					Some(t)
-						.filter(|t| {
-							let pos = ray.from(LinePosition(*t));
-							pos.y.abs() < 0.4
-						})
-						.map(|t| Radians(t))
-				})
-			}
-
 			let sphere = Self::sphere();
 			let mut solved_points = Vec::new();
 			let bar =
@@ -692,36 +715,198 @@ pub mod mobius {
 						for beta2 in iter_pi(count) {
 							let od = Angles3::new(alpha2, beta2);
 							let sphere_line = SphereLine3 { o, od };
-							let ray = sphere.from_line(&sphere_line);
-							let roots = calc_mobius_everywhere(&ray, 30);
-							// let roots = intersect_cylinder(&ray);
-							solved_points.push((sphere_line, roots));
+							let root = Self::f(&sphere, &sphere_line, 1000);
+							solved_points.push((sphere_line, root.map(|x| x.best_u)));
 						}
 					}
 				}
 			}
 			bar.finish();
-			Self { sphere, solved_points }
+			Self { count, sphere, solved_points }
 		}
 
-		pub fn load() -> Self {
-			let file = std::fs::read("points.bin").unwrap();
+		pub fn load(filename: &str) -> Self {
+			let file = std::fs::read(filename).unwrap();
 			bincode::deserialize(&file[..]).unwrap()
 		}
 
-		pub fn save(&self) {
+		pub fn save(&self, filename: &str) {
 			use std::{fs::File, io::prelude::*};
-			let mut file = File::create("points.bin").unwrap();
+			let mut file = File::create(filename).unwrap();
 			file.write_all(&bincode::serialize(&self).unwrap()).unwrap();
 		}
 
-		pub fn distance<F: Fn(&SphereLine3) -> Roots<Radians>>(&self, f: F) -> f64 {
+		pub fn save_csv(&self, filename: &str) {
+			use std::{fs::File, io::prelude::*};
+			let mut file = File::create(filename).unwrap();
+			for (line, should_be) in &self.solved_points {
+				if should_be.is_some() {
+					writeln!(
+						file,
+						"{},{},{},{},{}",
+						line.o.alpha.0,
+						line.o.beta.0,
+						line.od.alpha.0,
+						line.od.beta.0,
+						should_be.map(|x| x.0).unwrap_or(-1.)
+					)
+					.unwrap();
+				}
+			}
+		}
+
+		pub fn f(sphere: &Sphere3, sphere_line: &SphereLine3, count: usize) -> Option<Approx> {
+			let ray = sphere.from_line(sphere_line);
+			calc_mobius_everywhere(&ray, count)
+		}
+
+		pub fn distance<F: Fn(&SphereLine3) -> Option<Radians>>(&self, f: F) -> f64 {
 			let mut sum: f64 = 0.;
 			for (line, should_be) in &self.solved_points {
 				let actual = f(line);
-				sum += roots_distance(*should_be, actual, |a, b| (a.0 - b.0).abs(), 30.) as f64;
+				sum += options_distance(*should_be, actual, 30., |a, b| (a.0 - b.0).abs());
 			}
-			sum as f64
+			sum / self.solved_points.len() as f64
 		}
+
+		pub fn get_integer_angles(&self, line: &SphereLine3) -> (usize, usize, usize, usize) {
+			let count = self.count;
+
+			let alpha1 = line.o.alpha.0 / (2. * PI);
+			let beta1 = line.o.beta.0 / PI;
+			let alpha2 = line.od.alpha.0 / (2. * PI);
+			let beta2 = line.od.beta.0 / PI;
+
+			assert_between!(0., alpha1, 1.);
+			assert_between!(0., beta1, 1.);
+			assert_between!(0., alpha2, 1.);
+			assert_between!(0., beta2, 1.);
+
+			let alpha1i = ((alpha1 * count as f64).round() as usize) % count;
+			let beta1i = ((beta1 * count as f64).round() as usize) % count;
+			let alpha2i = ((alpha2 * count as f64).round() as usize) % count;
+			let beta2i = ((beta2 * count as f64).round() as usize) % count;
+
+			(alpha1i, beta1i, alpha2i, beta2i)
+		}
+
+		pub fn get_position_by_angles(
+			&self,
+			(mut alpha1i, mut beta1i, mut alpha2i, mut beta2i): (usize, usize, usize, usize),
+		) -> (usize, usize, usize) {
+			let count = self.count;
+
+			alpha1i %= count;
+			beta1i %= count;
+			alpha2i %= count;
+			beta2i %= count;
+
+			let x = alpha1i * count + alpha2i;
+			let y = beta1i * count + beta2i;
+			let pos = beta2i + alpha2i * count + beta1i * count * count + alpha1i * count * count * count;
+
+			(x, y, pos)
+		}
+
+		pub fn get_position(&self, line: &SphereLine3) -> (usize, usize, usize) {
+			self.get_position_by_angles(self.get_integer_angles(line))
+		}
+
+		pub fn distance_by_random<F: Fn(&SphereLine3) -> Option<Radians>, R: Rng>(&self, rng: &mut R, f: F) -> f64 {
+			let mut random_indexes = (0..self.solved_points.len()).collect::<Vec<_>>();
+			random_indexes.shuffle(rng);
+
+			count_average_optimized(0.0005, self.solved_points.len(), 100, |i| {
+				let (sphere_line, should_be) = &self.solved_points[random_indexes[i]];
+				let actual = f(&sphere_line);
+
+				options_distance(*should_be, actual, 30., |a, b| (a.0 - b.0).abs())
+			})
+		}
+
+		pub fn distance_by_complete_random<F: Fn(&SphereLine3) -> Option<Radians>, R: Rng>(rng: &mut R, f: F) -> f64 {
+			let sphere = Self::sphere();
+			count_average_optimized(0.00005, 30000, 100, |_| {
+				let sphere_line = random_sphere_line(rng);
+
+				let should_be = Self::f(&sphere, &sphere_line, 100).map(|x| x.best_u);
+				let actual = f(&sphere_line);
+
+				options_distance(should_be, actual, 30., |a, b| (a.0 - b.0).abs())
+			})
+		}
+
+		pub fn save_to_texture(&self, filename: &str) {
+			let count = self.count;
+			let mut image = Image::new(count * count, count * count);
+			for (pos, (line, should_be)) in self.solved_points.iter().enumerate() {
+				let (x, y, pos2) = self.get_position(&line);
+
+				assert_eq!(pos, pos2);
+
+				let color = if let Some(mut color) = should_be.map(|x| x.normalize()) {
+					color *= 256. * 256. * 256.;
+					let r = (color % 256.) as u8;
+					color /= 256.;
+					let g = (color % 256.) as u8;
+					color /= 256.;
+					let b = color as u8;
+					(r, g, b)
+				} else {
+					(0, 0, 0)
+				};
+
+				image.set_pixel(x, y, color);
+			}
+			image.save(filename);
+		}
+	}
+
+	pub fn random_sphere_line<R: Rng>(rng: &mut R) -> SphereLine3 {
+		let alpha1 = Radians(rng.gen_range((0.)..2. * PI));
+		let beta1 = Radians(rng.gen_range((0.)..PI));
+		let alpha2 = Radians(rng.gen_range((0.)..2. * PI));
+		let beta2 = Radians(rng.gen_range((0.)..PI));
+
+		let o = Angles3::new(alpha1, beta1);
+		let od = Angles3::new(alpha2, beta2);
+		let sphere_line = SphereLine3 { o, od };
+
+		sphere_line
+	}
+
+	pub fn count_average_optimized<F: FnMut(usize) -> f64>(
+		until_percent: f64,
+		max_iters: usize,
+		previous_count: usize,
+		mut f: F,
+	) -> f64 {
+		let mut all_sum = 0.;
+
+		let mut previous = VecDeque::with_capacity(previous_count);
+		let mut previous_sum = 0.;
+
+		for iters in 0..max_iters {
+			let current = f(iters);
+
+			all_sum += current;
+			previous_sum += current;
+
+			previous.push_back(current);
+
+			if previous.len() > previous_count {
+				let old = previous.pop_front().unwrap();
+				previous_sum -= old;
+
+				let previous_change = previous_sum / previous_count as f64;
+				let current_average = all_sum / (iters + 1) as f64;
+
+				if previous_change / current_average < until_percent {
+					return current_average;
+				}
+			}
+		}
+
+		all_sum / max_iters as f64
 	}
 }
