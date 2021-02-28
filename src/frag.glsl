@@ -346,7 +346,7 @@ SearchResult findBestApprox(float u, Ray r, SearchResult best) {
 
     float step = mobiusStep(u, r);
     for (int k = 0; k < 10; k++) {
-        if (step.x < eps_newton) {
+        if (step < eps_newton) {
             break;
         }
         float fx = step;
