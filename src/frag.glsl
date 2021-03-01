@@ -21,6 +21,9 @@ uniform sampler2D Mobius;
 #define PI acos(-1.)
 #define PI2 (PI/2)
 
+int texture_counti = 50;
+float texture_count = 50.;
+
 float round(float a) {
     return floor(a + 0.5);
 }
@@ -155,7 +158,7 @@ SphereLineIntersection intersect_sphere_line(Sphere s, Ray r) {
 }
 
 int simplemod(int a, int mod) {
-    if (a > mod) {
+    if (a >= mod) {
         a -= mod;
     }
     if (a < 0) {
@@ -164,20 +167,12 @@ int simplemod(int a, int mod) {
     return a;
 }
 
-int texture_counti = 8;
-float texture_count = 8.;
-
 float get_best_init_value_ipos(int alpha1i, int beta1i, int alpha2i, int beta2i) {
-    alpha1i = simplemod(alpha1i, texture_counti);
-    beta1i = simplemod(beta1i, texture_counti);
-    alpha2i = simplemod(alpha2i, texture_counti);
-    beta2i = simplemod(beta2i, texture_counti);
-
     int xi = alpha1i * texture_counti + alpha2i;
     int yi = beta1i * texture_counti + beta2i;
 
-    float x = float(xi) / (texture_count * texture_count);
-    float y = float(yi) / (texture_count * texture_count);
+    float x = (float(xi) + 0.5) / (texture_count * texture_count);
+    float y = (float(yi) + 0.5) / (texture_count * texture_count);
 
     vec3 color = texture2D(Mobius, vec2(x, y)).rgb;
 
@@ -186,26 +181,31 @@ float get_best_init_value_ipos(int alpha1i, int beta1i, int alpha2i, int beta2i)
     return value;
 }
 
-float get_best_init_value_angles(Angles3 o, Angles3 od, bool min) {
+ivec4 get_angles(Angles3 o, Angles3 od) {
     float alpha1 = o.alpha / (2. * PI);
     float beta1 = o.beta / PI;
     float alpha2 = od.alpha / (2. * PI);
     float beta2 = od.beta / PI;
 
-    int alpha1i = int(round(alpha1 * texture_count));
-    int beta1i = int(round(beta1 * texture_count));
-    int alpha2i = int(round(alpha2 * texture_count));
-    int beta2i = int(round(beta2 * texture_count));
+    int alpha1i = simplemod(int(floor(alpha1 * texture_count)), texture_counti);
+    int beta1i = simplemod(int(floor(beta1 * texture_count)), texture_counti);
+    int alpha2i = simplemod(int(floor(alpha2 * texture_count)), texture_counti);
+    int beta2i = simplemod(int(floor(beta2 * texture_count)), texture_counti);
 
-    return get_best_init_value_ipos(alpha1i, beta1i, alpha2i, beta2i);
+    return ivec4(alpha1i, beta1i, alpha2i, beta2i);
+}
+
+float get_best_init_value_angles(Angles3 o, Angles3 od) {
+    ivec4 result = get_angles(o, od);
+    return get_best_init_value_ipos(result.x, result.y, result.z, result.w);
 }
 
 vec2 get_best_init_value_ray(Ray r) {
     SphereLineIntersection hits = intersect_sphere_line(Sphere(vec3(0.), 1.55), r);
     if (hits.is_some) {
         return vec2(
-            get_best_init_value_angles(hits.o, hits.od, false),
-            get_best_init_value_angles(hits.od, hits.o, true)
+            get_best_init_value_angles(hits.o, hits.od),
+            get_best_init_value_angles(hits.od, hits.o)
         );
     } else {
         return vec2(-1., -1.);
@@ -488,7 +488,7 @@ struct SphereIntersect {
 SphereIntersect intersectSphere(Ray r)
 {
     vec3 sp = vec3(0, 0., 0.);
-    float sr = 1.5;
+    float sr = 1.55;
 
     vec3 op = sp - r.o;
     float b = dot(op, r.d);
@@ -616,6 +616,39 @@ CylinderIntersectResult intersect_cylinder(Ray ray) {
     }
 }
 
+// level is [0,5], assumed to be a whole number
+vec3 rainbow(float level)
+{
+    /*
+        Target colors
+        =============
+        
+        L  x   color
+        0  0.0 vec4(1.0, 0.0, 0.0, 1.0);
+        1  0.2 vec4(1.0, 0.5, 0.0, 1.0);
+        2  0.4 vec4(1.0, 1.0, 0.0, 1.0);
+        3  0.6 vec4(0.0, 0.5, 0.0, 1.0);
+        4  0.8 vec4(0.0, 0.0, 1.0, 1.0);
+        5  1.0 vec4(0.5, 0.0, 0.5, 1.0);
+    */
+    
+    float r = float(level <= 2.0) + float(level > 4.0) * 0.5;
+    float g = max(1.0 - abs(level - 2.0) * 0.5, 0.0);
+    float b = (1.0 - (level - 4.0) * 0.5) * float(level >= 4.0);
+    return vec3(r, g, b);
+}
+
+vec3 smoothRainbow (float x)
+{
+    float level1 = floor(x*6.0);
+    float level2 = min(6.0, floor(x*6.0) + 1.0);
+    
+    vec3 a = rainbow(level1);
+    vec3 b = rainbow(level2);
+    
+    return mix(a, b, fract(x*6.0));
+}
+
 vec3 intersectScene(Ray r) {
     Plane p = Plane(crdDefault);
     float size = 4.5;
@@ -628,6 +661,37 @@ vec3 intersectScene(Ray r) {
     for (int i = 0; i < 100; ++i) {
         float current_t = 1e10;
         vec3 current_color = color(0.6, 0.6, 0.6);
+
+        if (intersect_mobius_sphere(r)) {
+            vec2 hit_best = get_best_init_value_ray(r);
+            current_t = 0.1;
+            if (hit_best.x > 0.) {
+                SearchResult best = SearchResult(-1., 0., 0.);
+                best = updateBestApprox(best, findBestApprox(hit_best.x, r, best));
+                best = updateBestApprox(best, findBestApprox(hit_best.y, r, best));
+                current_color = smoothRainbow(best.u / (2. * PI));
+                // current_color = smoothRainbow(hit_best.x / (2. * PI));
+            } else {
+                current_color = color(0., 0., 0.);
+            }
+        }
+
+        // SphereLineIntersection hits = intersect_sphere_line(Sphere(vec3(0.), 1.55), r);
+        // if (hits.is_some) {
+        //     ivec4 result = get_angles(hits.o, hits.od);
+        //     current_t = 0.1;
+        //     if (result.z == 0) {
+        //         current_color = color(1., 0., 0.);
+        //     } else if (result.z + 1 == texture_counti) {
+        //         current_color = color(0., 1., 0.);
+        //     } else if (result.w == 0) {
+        //         current_color = color(1., 0., 1.);
+        //     } else if (result.w + 1 == texture_counti) {
+        //         current_color = color(0., 1., 1.);
+        //     } else {
+        //         current_color = smoothRainbow(float(result.z + result.w) / (texture_count + texture_count));
+        //     }
+        // }
 
         // SphereIntersect hits = intersectSphere(r);
         // if (hits.hit && hits.t < current_t) {
@@ -702,7 +766,7 @@ vec3 intersectScene(Ray r) {
         //     current_t = hitmobius.t;
         // }
 
-        // return current_color * gray;
+        return current_color * gray;
 
         MobiusIntersect hit = intersectMobius2(Ray(mulCrd(first, r.o), mulDir(first, r.d)));
         MobiusIntersect hit2 = intersectMobius2(Ray(mulCrd(second, r.o), mulDir(second, r.d)));

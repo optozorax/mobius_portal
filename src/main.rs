@@ -12,7 +12,7 @@ fn draw_multiline_text(text: &str, x: f32, y: f32, font_size: f32, color: Color)
 #[macroquad::main("Precalculation of 3D object")]
 async fn main() {
 	let texture: Texture2D = load_texture("watermark.png").await;
-	let mobius_precalculated = load_texture("brute_force8.png").await;
+	let mobius_precalculated = load_texture("data/brute_force50.png").await;
 
 	let lens_material = load_material(LENS_VERTEX_SHADER, LENS_FRAGMENT_SHADER, MaterialParams {
 		textures: vec!["Mobius".to_string()],

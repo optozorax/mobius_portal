@@ -14,8 +14,6 @@ use rand::prelude::*;
 fn make_data_to_improved_predictions(points: &MobiusPoints) {
 	let mut rng = rand::thread_rng();
 
-	let count = points.count;
-
 	use std::{fs::File, io::prelude::*};
 	let mut file = File::create("points.csv").unwrap();
 
@@ -40,10 +38,8 @@ fn make_data_to_improved_predictions(points: &MobiusPoints) {
 		let sphere_line = SphereLine3 { o, od };
 
 		if let Some(should_be) = MobiusPoints::f(&sphere, &sphere_line, 100) {
-			let current = points.solved_points[points.get_position(&sphere_line).2]
-				.1
-				.map(|x| x.0)
-				.unwrap_or(-1.);
+			let anglesi = points.solved_points.get_integer_angles(&sphere_line);
+			let current = points.solved_points[anglesi].map(|x| x.0).unwrap_or(-1.);
 
 			writeln!(
 				file,
@@ -58,13 +54,13 @@ fn make_data_to_improved_predictions(points: &MobiusPoints) {
 }
 
 fn main() {
-	let count = 30;
+	let count = 20;
 	// make_data_to_improved_predictions(&MobiusPoints::load());
-	// let points = MobiusPoints::calc(count);
-	let points = MobiusPoints::load("points30_1000.bin");
-	points.save_csv("points30_1000.csv");
+	let points = MobiusPoints::calc(count);
+	// let points = MobiusPoints::load("points30_1000.bin");
+	// points.save_csv("points30_1000.csv");
 	// points.save("points30_1000.bin");
-	// points.save_to_texture("texture30_1000.png");
+	points.save_to_texture("data/texture10_30.png");
 	// let points = MobiusPoints::load();
 	// points.save_csv();
 }

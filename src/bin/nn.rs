@@ -1,5 +1,6 @@
 use std::f64::consts::PI;
 
+#[allow(unused_imports)]
 use argmin::{
 	prelude::*,
 	solver::{
@@ -10,18 +11,19 @@ use argmin::{
 		trustregion::Steihaug,
 	},
 };
-use finitediff::*;
+#[allow(unused_imports)]
+use finitediff::FiniteDiff;
 use glam::{DMat4 as Mat4, DVec4 as Vec4};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2};
 #[allow(unused_imports)]
 use openblas_src::*;
 use portals::{
 	angle::Radians,
-	mobius::{calc_mobius_from, random_sphere_line, update_best_approx, ApproachMobiusResult, Approx, MobiusPoints},
-	sphere::SphereLine3,
+	mobius::{calc_mobius_from, random_sphere_line, update_best_approx, Approx, MobiusPoints},
+	option::AnyOrBothWith,
+	progress::*,
+	sphere::{SphereLine3, SphereLine3i, SphereLineVec},
 };
-use rand::prelude::*;
 
 struct Mobius {
 	data: MobiusPoints,
@@ -110,6 +112,7 @@ fn cost(data: &MobiusPoints, p: &[f64]) -> f64 {
 	// data.distance_by_random(&mut rand::thread_rng(), f)
 }
 
+#[allow(unused_variables)]
 impl ArgminOp for Mobius {
 	type Float = f64;
 	type Hessian = Array2<f64>;
@@ -122,18 +125,20 @@ impl ArgminOp for Mobius {
 	}
 
 	fn gradient(&self, p: &Self::Param) -> Result<Self::Param, Error> {
-		Ok((*p).forward_diff(&|x| self.apply(&x).unwrap()))
+		// Ok((*p).forward_diff(&|x| self.apply(&x).unwrap()))
+		todo!()
 	}
 
 	fn hessian(&self, p: &Self::Param) -> Result<Self::Hessian, Error> {
-		Ok((*p).forward_hessian(&|x| self.gradient(&x).unwrap()))
+		// Ok((*p).forward_hessian(&|x| self.gradient(&x).unwrap()))
+		todo!()
 	}
 }
 
+#[allow(unused_variables, dead_code)]
 fn run(matrices: usize, data: MobiusPoints, init: &[f64]) -> Result<(), Error> {
 	let cost = Mobius { data };
 	let init_param: Array1<f64> = init.iter().map(|x| *x as f64).collect::<Vec<_>>().into();
-	let init_hessian: Array2<f64> = Array2::eye(matrices * 20);
 
 	let linesearch = {
 		MoreThuenteLineSearch::new().c(1e-4, 0.9)?
@@ -142,7 +147,7 @@ fn run(matrices: usize, data: MobiusPoints, init: &[f64]) -> Result<(), Error> {
 	};
 
 	let solver = {
-		// BFGS::new(init_hessian, linesearch)
+		// BFGS::new(Array2::eye(matrices * 20), linesearch)
 		// NonlinearConjugateGradient::new(linesearch, PolakRibiere::new())?
 		// .restart_iters(10)
 		// .restart_orthogonality(0.1)
@@ -164,8 +169,6 @@ fn run(matrices: usize, data: MobiusPoints, init: &[f64]) -> Result<(), Error> {
 }
 
 use std::time::{Duration, Instant};
-
-use differential_evolution::self_adaptive_de;
 
 pub fn time<F: FnOnce()>(f: F) -> Duration {
 	let now = Instant::now();
@@ -464,46 +467,24 @@ fn main() {
 
 	*/
 
-	let brute_force_count = 8;
-
-	let mut new_texture =
-		vec![vec![vec![vec![vec![]; brute_force_count]; brute_force_count]; brute_force_count]; brute_force_count];
-
-	let random_count = brute_force_count * brute_force_count * brute_force_count * brute_force_count * 10;
-
+	let brute_force_count = 50;
 	let mut brute_force_points = MobiusPoints::calc(brute_force_count);
-	brute_force_points.save_to_texture(&format!("points{}.png", brute_force_count));
 
 	let f = |brute_force_points: &MobiusPoints, line: &SphereLine3| {
-		let (alpha1i, beta1i, alpha2i, beta2i) = brute_force_points.get_integer_angles(&line);
+		let linei = line.to_integer(brute_force_count);
 		let mut to_visit = Vec::with_capacity(2);
-		if let Some(u) = brute_force_points.solved_points[brute_force_points
-			.get_position_by_angles((alpha1i, beta1i, alpha2i, beta2i))
-			.2]
-			.1
-		{
+		if let Some(u) = brute_force_points.solved_points[linei.clone()] {
 			to_visit.push(u);
 		}
-		if let Some(u) = brute_force_points.solved_points[brute_force_points
-			.get_position_by_angles((alpha2i, beta2i, alpha1i, beta1i))
-			.2]
-			.1
-		{
+		if let Some(u) = brute_force_points.solved_points[SphereLine3i { o: linei.od, od: linei.o }] {
 			to_visit.push(u);
-		}
-		if to_visit.is_empty() {
-			to_visit.push(Radians(0.));
 		}
 
 		let mut best: Option<Approx> = None;
+		let sphere = MobiusPoints::sphere();
+		let ray = sphere.from_line(line);
 		for current in to_visit {
-			let sphere = MobiusPoints::sphere();
-			let ray = sphere.from_line(line);
-			if let Some(approx) = calc_mobius_from(&ray, current) {
-				if approx.best_approach.t_mobius.0.abs() < 1. && approx.best_approach.distance < 5e-4 {
-					best = update_best_approx(Some(approx), best);
-				}
-			}
+			best = update_best_approx(calc_mobius_from(&ray, current), best);
 		}
 		best.map(|approx| approx.best_u)
 	};
@@ -512,97 +493,38 @@ fn main() {
 		MobiusPoints::distance_by_complete_random(&mut rng, |line| f(&brute_force_points, line));
 	dbg!(texture_newton_result);
 
-	let bar = ProgressBar::new(random_count as u64).with_style(
-		ProgressStyle::default_bar()
-			.template("[elapsed: {elapsed_precise:>8} | remaining: {eta_precise:>8} | {percent:>3}%] {wide_bar}"),
-	);
-	for _ in 0..random_count {
-		bar.inc(1);
+
+	// let mut new_texture = SphereLineVec::init(brute_force_count, |_| vec![]);
+	let random_count = brute_force_count.pow(3u32) * 30;
+	for _ in (0..random_count).my_progress() {
 		let sphere_line = random_sphere_line(&mut rng);
-
-		let (alpha1i, beta1i, alpha2i, beta2i) = brute_force_points.get_integer_angles(&sphere_line);
-		if let Some(approx) = MobiusPoints::f(&sphere, &sphere_line, 100) {
-			new_texture[alpha1i][beta1i][alpha2i][beta2i].push((sphere_line, approx));
-		}
-	}
-	bar.finish();
-
-	let bar = ProgressBar::new((brute_force_count * brute_force_count) as u64).with_style(
-		ProgressStyle::default_bar()
-			.template("[elapsed: {elapsed_precise:>8} | remaining: {eta_precise:>8} | {percent:>3}%] {wide_bar}"),
-	);
-	for (alpha1i, next_arr) in new_texture.iter().enumerate() {
-		for (beta1i, next_arr) in next_arr.iter().enumerate() {
-			bar.inc(1);
-			for (alpha2i, next_arr) in next_arr.iter().enumerate() {
-				bar.tick();
-				for (beta2i, arr1) in next_arr.iter().enumerate() {
-					let arr2 = &new_texture[alpha2i][beta2i][alpha1i][beta1i];
-
-					let mut best = None;
-					for (
-						_,
-						Approx { best_u: probably_best1, best_approach: ApproachMobiusResult { t_line: t_line1, .. } },
-					) in arr1.iter()
-					{
-						for (
-							_,
-							Approx {
-								best_u: probably_best2,
-								best_approach: ApproachMobiusResult { t_line: t_line2, .. },
-							},
-						) in arr2.iter()
-						{
-							let mut current_sum = 0.;
-
-							for (sphere_line, Approx { best_u: current_best, .. }) in arr1.iter().cloned().chain(
-								arr2.iter()
-									.cloned()
-									.map(|(SphereLine3 { o, od }, approx)| (SphereLine3 { o: od, od: o }, approx)),
-							) {
-								let ray = sphere.from_line(&sphere_line);
-
-								let current1 = calc_mobius_from(&ray, *probably_best1)
-									.map(|Approx { best_u, .. }| (current_best.0 - best_u.0).abs())
-									.unwrap_or(current_best.0);
-								let current2 = calc_mobius_from(&ray, *probably_best2)
-									.map(|Approx { best_u, .. }| (current_best.0 - best_u.0).abs())
-									.unwrap_or(current_best.0);
-
-								current_sum += current1.min(current2);
-							}
-							best = best
-								.map(|(best_sum, x)| {
-									if current_sum < best_sum {
-										(current_sum, ((probably_best1, t_line1), (probably_best2, t_line2)))
-									} else {
-										(best_sum, x)
-									}
-								})
-								.or(Some((current_sum, ((probably_best1, t_line1), (probably_best2, t_line2)))));
-						}
-					}
-
-					let (_, _, pos1) = brute_force_points.get_position_by_angles((alpha1i, beta1i, alpha2i, beta2i));
-					let (_, _, pos2) = brute_force_points.get_position_by_angles((alpha2i, beta2i, alpha1i, beta1i));
-
-					if let Some((_, (a, b))) = best {
-						if a.1.0 < b.1.0 {
-							brute_force_points.solved_points[pos1].1 = Some(*a.0);
-							brute_force_points.solved_points[pos2].1 = Some(*b.0);
-						} else {
-							brute_force_points.solved_points[pos1].1 = Some(*b.0);
-							brute_force_points.solved_points[pos2].1 = Some(*a.0);
-						}
-					}
-				}
+		if let Some(should_be) = MobiusPoints::f(&sphere, &sphere_line, 100) {
+			if let Some(_) = f(&brute_force_points, &sphere_line) {
+				// if (should_be.best_u.0 - actual.0) > 0.01 {
+				// 	brute_force_points.solved_points[sphere_line.to_integer(brute_force_count)] = Some(should_be.best_u);
+				// }
+			} else {
+				brute_force_points.solved_points[sphere_line.to_integer(brute_force_count)] = Some(should_be.best_u);
 			}
 		}
 	}
-	bar.finish();
 
-	brute_force_points.save(&format!("brute_force{}.bin", brute_force_count));
-	brute_force_points.save_to_texture(&format!("brute_force{}.png", brute_force_count));
+	// for (line, arr) in new_texture.iter().my_progress() {
+	// 	if let Some((a, b)) = portals::cluster::find_two_clusters(&arr, |x, y| (x.1.best_u.0 - y.1.best_u.0)) {
+	// 		let current1 = calc_mobius_from(&sphere.from_line(&a.0), a.1.best_u);
+	// 		let current2 = calc_mobius_from(&sphere.from_line(&b.0), b.1.best_u);
+
+	// 		brute_force_points.solved_points[line] = current1
+	// 			.any_or_both_with(
+	// 				current2,
+	// 				|a, b| if a.best_approach.t_line.0 < b.best_approach.t_line.0 { a } else { b },
+	// 			)
+	// 			.map(|x| x.best_u);
+	// 	}
+	// }
+
+	brute_force_points.save(&format!("data/brute_force{}.bin", brute_force_count));
+	brute_force_points.save_to_texture(&format!("data/brute_force{}.png", brute_force_count));
 
 	let own_texture = MobiusPoints::distance_by_complete_random(&mut rng, |line| f(&brute_force_points, line));
 	dbg!(own_texture);

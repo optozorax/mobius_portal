@@ -64,6 +64,7 @@ pub mod assert {
 	#[macro_export]
 	macro_rules! assert_between {
 		($lt:expr, $val:expr, $gt:expr) => {{
+			#[allow(unused_comparisons)]
 			if $val < $lt {
 				panic!("{} < {} violated with values {} < {}", stringify!($lt), stringify!($val), $lt, $val);
 			}
@@ -289,17 +290,43 @@ pub mod quadratic_equation {
 }
 
 pub mod sphere {
-	use std::f64::consts::PI;
+	use std::{
+		f64::consts::PI,
+		ops::{Index, IndexMut},
+	};
 
 	use glam::DVec3 as Vec3;
 	use serde::{Deserialize, Serialize};
 
-	use crate::{angle::Radians, line::*, quadratic_equation::*};
+	use crate::{angle::Radians, line::*, progress::*, quadratic_equation::*};
 
 	#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 	pub struct Angles3 {
 		pub alpha: Radians,
 		pub beta: Radians,
+	}
+
+	#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+	pub struct Angles3i {
+		pub alpha: usize,
+		pub beta: usize,
+		pub count: usize,
+	}
+
+	impl Angles3 {
+		pub fn to_integer(&self, count: usize) -> Angles3i {
+			let alpha = self.alpha.0 / (2. * PI);
+			let beta = self.beta.0 / PI;
+
+			assert_between!(0., alpha, 1.);
+			assert_between!(0., beta, 1.);
+
+			Angles3i {
+				alpha: ((alpha * count as f64).floor() as usize) % count,
+				beta: ((beta * count as f64).floor() as usize) % count,
+				count,
+			}
+		}
 	}
 
 	impl Angles3 {
@@ -314,6 +341,15 @@ pub mod sphere {
 
 	impl Sph3 {
 		pub fn new(alpha: Radians, beta: Radians, r: f64) -> Self { Sph3 { angles: Angles3::new(alpha, beta), r } }
+	}
+
+	impl From<Angles3i> for Angles3 {
+		fn from(o: Angles3i) -> Angles3 {
+			Angles3 {
+				alpha: Radians(o.alpha as f64 / o.count as f64 * 2. * PI),
+				beta: Radians(o.beta as f64 / o.count as f64 * PI),
+			}
+		}
 	}
 
 	impl From<Vec3> for Angles3 {
@@ -337,6 +373,152 @@ pub mod sphere {
 	}
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
+	pub struct SphereVec<T> {
+		count: usize,
+		points: Vec<Vec<T>>,
+	}
+
+	pub struct SphereVecIter<'a, T> {
+		alpha: usize,
+		beta: usize,
+		sphere_vec: &'a SphereVec<T>,
+	}
+
+	impl<'a, T> Iterator for SphereVecIter<'a, T> {
+		type Item = (Angles3i, &'a T);
+
+		fn next(&mut self) -> Option<Self::Item> {
+			if self.alpha == self.sphere_vec.count {
+				self.alpha = 0;
+				self.beta += 1;
+			}
+
+			if self.beta == self.sphere_vec.count {
+				return None;
+			}
+
+			let result = (
+				Angles3i { alpha: self.alpha, beta: self.beta, count: self.sphere_vec.count },
+				&self.sphere_vec.points[self.alpha][self.beta],
+			);
+			self.alpha += 1;
+			Some(result)
+		}
+	}
+
+	impl<'a, T> ExactSizeIterator for SphereVecIter<'a, T> {
+		fn len(&self) -> usize { self.sphere_vec.count.pow(2) }
+	}
+
+	impl<T> SphereVec<T> {
+		pub fn init<F: FnMut(Angles3) -> T>(count: usize, mut f: F) -> Self {
+			SphereVec {
+				count,
+				points: (0..count)
+					.map(|alpha| {
+						(0..count)
+							.map(|beta| f(Angles3i { alpha, beta, count }.into()))
+							.collect::<Vec<T>>()
+					})
+					.collect::<Vec<Vec<T>>>(),
+			}
+		}
+
+		pub fn iter(&self) -> SphereVecIter<T> { SphereVecIter { alpha: 0, beta: 0, sphere_vec: self } }
+	}
+
+	impl<T> Index<Angles3i> for SphereVec<T> {
+		type Output = T;
+
+		fn index(&self, pos: Angles3i) -> &Self::Output {
+			assert_eq!(pos.count, self.count);
+			assert_between!(0, pos.alpha, self.count);
+			assert_between!(0, pos.beta, self.count);
+			return &self.points[pos.alpha][pos.beta];
+		}
+	}
+
+	impl<T> IndexMut<Angles3i> for SphereVec<T> {
+		fn index_mut(&mut self, pos: Angles3i) -> &mut Self::Output {
+			assert_eq!(pos.count, self.count);
+			assert_between!(0, pos.alpha, self.count);
+			assert_between!(0, pos.beta, self.count);
+			&mut self.points[pos.alpha][pos.beta]
+		}
+	}
+
+	#[derive(Debug, Clone, Serialize, Deserialize)]
+	pub struct SphereLineVec<T>(SphereVec<SphereVec<T>>);
+
+	pub struct SphereLineVecIter<'a, T> {
+		o: SphereVecIter<'a, SphereVec<T>>,
+		current_o: Angles3i,
+		od: SphereVecIter<'a, T>,
+	}
+
+	impl<'a, T> ExactSizeIterator for SphereLineVecIter<'a, T> {
+		fn len(&self) -> usize { self.o.len().pow(2) }
+	}
+
+	#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+	pub struct TexturePosition {
+		pub x: usize,
+		pub y: usize,
+		pub count: usize,
+	}
+
+	impl<T> SphereLineVec<T> {
+		pub fn init<F: FnMut(SphereLine3) -> T>(count: usize, mut f: F) -> Self {
+			let bar = my_bar(count.pow(4) as u64);
+			Self(SphereVec::init(count, |o| {
+				SphereVec::init(count, |od| {
+					bar.inc(1);
+					f(SphereLine3 { o, od })
+				})
+			}))
+		}
+
+		pub fn iter(&self) -> SphereLineVecIter<T> {
+			let current_o = Angles3i { count: self.0.count, alpha: 0, beta: 0 };
+			SphereLineVecIter { current_o, o: self.0.iter(), od: self.0[current_o].iter() }
+		}
+
+		pub fn count(&self) -> usize { self.0.count }
+
+		pub fn get_integer_angles(&self, line: &SphereLine3) -> SphereLine3i { line.to_integer(self.0.count) }
+
+		pub fn get_texture_position(&self, line: &SphereLine3) -> TexturePosition {
+			self.get_integer_angles(line).into()
+		}
+	}
+
+	impl<'a, T> Iterator for SphereLineVecIter<'a, T> {
+		type Item = (SphereLine3i, &'a T);
+
+		fn next(&mut self) -> Option<Self::Item> {
+			loop {
+				if let Some((od, next)) = self.od.next() {
+					return Some((SphereLine3i { o: self.current_o, od }, next));
+				} else {
+					let (o, arr) = self.o.next()?;
+					self.current_o = o;
+					self.od = arr.iter();
+				}
+			}
+		}
+	}
+
+	impl<T> Index<SphereLine3i> for SphereLineVec<T> {
+		type Output = T;
+
+		fn index(&self, pos: SphereLine3i) -> &Self::Output { &self.0[pos.o][pos.od] }
+	}
+
+	impl<T> IndexMut<SphereLine3i> for SphereLineVec<T> {
+		fn index_mut(&mut self, pos: SphereLine3i) -> &mut Self::Output { &mut self.0[pos.o][pos.od] }
+	}
+
+	#[derive(Debug, Clone, Serialize, Deserialize)]
 	pub struct Sphere3 {
 		pub pos: Vec3,
 		pub r: f64,
@@ -346,6 +528,47 @@ pub mod sphere {
 	pub struct SphereLine3 {
 		pub o: Angles3,
 		pub od: Angles3,
+	}
+
+	#[derive(Debug, Clone, Serialize, Deserialize)]
+	pub struct SphereLine3i {
+		pub o: Angles3i,
+		pub od: Angles3i,
+	}
+
+	impl From<SphereLine3i> for SphereLine3 {
+		fn from(l: SphereLine3i) -> SphereLine3 { SphereLine3 { o: l.o.into(), od: l.od.into() } }
+	}
+
+	impl From<SphereLine3i> for TexturePosition {
+		fn from(pos: SphereLine3i) -> TexturePosition {
+			assert_eq!(pos.o.count, pos.od.count);
+			TexturePosition {
+				x: pos.o.alpha * pos.o.count + pos.od.alpha,
+				y: pos.o.beta * pos.o.count + pos.od.beta,
+				count: pos.o.count,
+			}
+		}
+	}
+
+	impl From<TexturePosition> for SphereLine3i {
+		fn from(pos: TexturePosition) -> SphereLine3i {
+			let o_alpha = pos.x / pos.count;
+			let od_alpha = pos.x % pos.count;
+			let o_beta = pos.y / pos.count;
+			let od_beta = pos.y % pos.count;
+			let count = pos.count;
+			SphereLine3i {
+				o: Angles3i { alpha: o_alpha, beta: o_beta, count },
+				od: Angles3i { alpha: od_alpha, beta: od_beta, count },
+			}
+		}
+	}
+
+	impl SphereLine3 {
+		pub fn to_integer(&self, count: usize) -> SphereLine3i {
+			SphereLine3i { o: self.o.to_integer(count), od: self.od.to_integer(count) }
+		}
 	}
 
 	impl Sphere3 {
@@ -519,11 +742,67 @@ pub mod cam {
 	}
 }
 
+pub mod cluster {
+	use itertools::Itertools;
+	use ordered_float::NotNan;
+
+	use crate::mymin;
+
+	pub fn find_two_clusters<T, F: Fn(&T, &T) -> f64>(input: &[T], f: F) -> Option<(&T, &T)> {
+		input
+			.iter()
+			.cartesian_product(input.iter())
+			.map(|(i, j)| (i, j, input.iter().map(|x| mymin(f(x, i), f(x, j))).sum::<f64>()))
+			.min_by_key(|(_, _, s)| NotNan::new(*s).unwrap())
+			.map(|(i, j, _)| (i, j))
+	}
+}
+
+pub mod progress {
+	use indicatif::{ProgressBar, ProgressStyle};
+
+	pub fn my_bar(count: u64) -> ProgressBar {
+		ProgressBar::new(count).with_style(
+			ProgressStyle::default_bar()
+				.template("[elapsed: {elapsed_precise:>8} | remaining: {eta_precise:>8} | {percent:>3}%] {wide_bar}"),
+		)
+	}
+
+	pub struct MyProgress<I> {
+		iter: I,
+		bar: ProgressBar,
+	}
+
+	pub trait MyProgressTrait: Sized {
+		fn my_progress(self) -> MyProgress<Self>;
+	}
+
+	impl<T: ExactSizeIterator> MyProgressTrait for T {
+		fn my_progress(self) -> MyProgress<Self> { MyProgress { bar: my_bar(self.len() as u64), iter: self } }
+	}
+
+	impl<T, I: Iterator<Item = T>> Iterator for MyProgress<I> {
+		type Item = T;
+
+		fn next(&mut self) -> Option<Self::Item> {
+			match self.iter.next() {
+				Some(result) => {
+					self.bar.inc(1);
+					Some(result)
+				},
+				None => {
+					self.bar.finish();
+					None
+				},
+			}
+		}
+	}
+}
+
 pub mod mobius {
-	use std::{collections::VecDeque, f64::consts::PI, io::Write};
+	use std::{collections::VecDeque, f64::consts::PI};
 
 	use glam::DVec3 as Vec3;
-	use indicatif::{ProgressBar, ProgressStyle};
 	use rand::prelude::*;
 	use serde::{Deserialize, Serialize};
 
@@ -644,9 +923,8 @@ pub mod mobius {
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	pub struct MobiusPoints {
-		pub count: usize,
 		pub sphere: Sphere3,
-		pub solved_points: Vec<(SphereLine3, Option<Radians>)>,
+		pub solved_points: SphereLineVec<Option<Radians>>,
 	}
 
 	pub fn roots_distance<T: Copy, F: Fn(T, T) -> f64>(
@@ -700,29 +978,10 @@ pub mod mobius {
 
 		pub fn calc(count: usize) -> Self {
 			let sphere = Self::sphere();
-			let mut solved_points = Vec::new();
-			let bar =
-				ProgressBar::new((count * count) as u64).with_style(ProgressStyle::default_bar().template(
-					"[elapsed: {elapsed_precise:>8} | remaining: {eta_precise:>8} | {percent:>3}%] {wide_bar}",
-				));
-			for alpha1 in iter_2pi(count) {
-				for beta1 in iter_pi(count) {
-					bar.inc(1);
-					bar.tick();
-					std::io::stdout().flush().unwrap();
-					let o = Angles3::new(alpha1, beta1);
-					for alpha2 in iter_2pi(count) {
-						for beta2 in iter_pi(count) {
-							let od = Angles3::new(alpha2, beta2);
-							let sphere_line = SphereLine3 { o, od };
-							let root = Self::f(&sphere, &sphere_line, 1000);
-							solved_points.push((sphere_line, root.map(|x| x.best_u)));
-						}
-					}
-				}
+			Self {
+				sphere: sphere.clone(),
+				solved_points: SphereLineVec::init(count, |l| Self::f(&sphere, &l, 30).map(|x| x.best_u)),
 			}
-			bar.finish();
-			Self { count, sphere, solved_points }
 		}
 
 		pub fn load(filename: &str) -> Self {
@@ -739,7 +998,8 @@ pub mod mobius {
 		pub fn save_csv(&self, filename: &str) {
 			use std::{fs::File, io::prelude::*};
 			let mut file = File::create(filename).unwrap();
-			for (line, should_be) in &self.solved_points {
+			for (line, should_be) in self.solved_points.iter() {
+				let line: SphereLine3 = line.into();
 				if should_be.is_some() {
 					writeln!(
 						file,
@@ -762,66 +1022,14 @@ pub mod mobius {
 
 		pub fn distance<F: Fn(&SphereLine3) -> Option<Radians>>(&self, f: F) -> f64 {
 			let mut sum: f64 = 0.;
-			for (line, should_be) in &self.solved_points {
-				let actual = f(line);
+			let mut count = 0;
+			for (line, should_be) in self.solved_points.iter() {
+				let line: SphereLine3 = line.into();
+				let actual = f(&line);
 				sum += options_distance(*should_be, actual, 30., |a, b| (a.0 - b.0).abs());
+				count += 1;
 			}
-			sum / self.solved_points.len() as f64
-		}
-
-		pub fn get_integer_angles(&self, line: &SphereLine3) -> (usize, usize, usize, usize) {
-			let count = self.count;
-
-			let alpha1 = line.o.alpha.0 / (2. * PI);
-			let beta1 = line.o.beta.0 / PI;
-			let alpha2 = line.od.alpha.0 / (2. * PI);
-			let beta2 = line.od.beta.0 / PI;
-
-			assert_between!(0., alpha1, 1.);
-			assert_between!(0., beta1, 1.);
-			assert_between!(0., alpha2, 1.);
-			assert_between!(0., beta2, 1.);
-
-			let alpha1i = ((alpha1 * count as f64).round() as usize) % count;
-			let beta1i = ((beta1 * count as f64).round() as usize) % count;
-			let alpha2i = ((alpha2 * count as f64).round() as usize) % count;
-			let beta2i = ((beta2 * count as f64).round() as usize) % count;
-
-			(alpha1i, beta1i, alpha2i, beta2i)
-		}
-
-		pub fn get_position_by_angles(
-			&self,
-			(mut alpha1i, mut beta1i, mut alpha2i, mut beta2i): (usize, usize, usize, usize),
-		) -> (usize, usize, usize) {
-			let count = self.count;
-
-			alpha1i %= count;
-			beta1i %= count;
-			alpha2i %= count;
-			beta2i %= count;
-
-			let x = alpha1i * count + alpha2i;
-			let y = beta1i * count + beta2i;
-			let pos = beta2i + alpha2i * count + beta1i * count * count + alpha1i * count * count * count;
-
-			(x, y, pos)
-		}
-
-		pub fn get_position(&self, line: &SphereLine3) -> (usize, usize, usize) {
-			self.get_position_by_angles(self.get_integer_angles(line))
-		}
-
-		pub fn distance_by_random<F: Fn(&SphereLine3) -> Option<Radians>, R: Rng>(&self, rng: &mut R, f: F) -> f64 {
-			let mut random_indexes = (0..self.solved_points.len()).collect::<Vec<_>>();
-			random_indexes.shuffle(rng);
-
-			count_average_optimized(0.0005, self.solved_points.len(), 100, |i| {
-				let (sphere_line, should_be) = &self.solved_points[random_indexes[i]];
-				let actual = f(&sphere_line);
-
-				options_distance(*should_be, actual, 30., |a, b| (a.0 - b.0).abs())
-			})
+			sum / count as f64
 		}
 
 		pub fn distance_by_complete_random<F: Fn(&SphereLine3) -> Option<Radians>, R: Rng>(rng: &mut R, f: F) -> f64 {
@@ -837,12 +1045,10 @@ pub mod mobius {
 		}
 
 		pub fn save_to_texture(&self, filename: &str) {
-			let count = self.count;
+			let count = self.solved_points.count();
 			let mut image = Image::new(count * count, count * count);
-			for (pos, (line, should_be)) in self.solved_points.iter().enumerate() {
-				let (x, y, pos2) = self.get_position(&line);
-
-				assert_eq!(pos, pos2);
+			for (line, should_be) in self.solved_points.iter() {
+				let TexturePosition { x, y, .. } = line.into();
 
 				let color = if let Some(mut color) = should_be.map(|x| x.normalize()) {
 					color *= 256. * 256. * 256.;
