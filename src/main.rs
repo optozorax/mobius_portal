@@ -12,7 +12,7 @@ fn draw_multiline_text(text: &str, x: f32, y: f32, font_size: f32, color: Color)
 #[macroquad::main("Precalculation of 3D object")]
 async fn main() {
 	let texture: Texture2D = load_texture("watermark.png").await;
-	let mobius_precalculated = load_texture("data/brute_force50.png").await;
+	let mobius_precalculated = load_texture("data/brute_force30.png").await;
 
 	let lens_material = load_material(LENS_VERTEX_SHADER, LENS_FRAGMENT_SHADER, MaterialParams {
 		textures: vec!["Mobius".to_string()],
@@ -46,13 +46,8 @@ async fn main() {
 
 	const SCALE_FACTOR: f32 = 1.1;
 
-	// let mut first = Mat4::from_rotation_x(PI/2.) * Mat4::from_translation(-Vec3::new(0., 0., -2.));
-	let mut first = Mat4::identity();
+	let mut first = Mat4::from_rotation_x(PI/2.) * Mat4::from_translation(-Vec3::new(0., 0., -2.));
 	let second = Mat4::from_rotation_x(PI / 2.) * Mat4::from_translation(-Vec3::new(0., 0., 2.));
-
-	// This creates Mobius monoportal. Tsss, don' tell anyone before official announcement.
-	// let mut first = Mat4::identity();
-	// let second = Mat4::from_scale(Vec3::new(1., -1., -1.)) * Mat4::from_translation(-Vec3::new(0., 0., 0.));
 
 	let mut first_inv = first.inverse() * second;
 	let mut second_inv = second.inverse() * first;

@@ -21,8 +21,8 @@ uniform sampler2D Mobius;
 #define PI acos(-1.)
 #define PI2 (PI/2)
 
-int texture_counti = 50;
-float texture_count = 50.;
+int texture_counti = 30;
+float texture_count = 30.;
 
 float round(float a) {
     return floor(a + 0.5);
@@ -471,10 +471,8 @@ SearchResult findBest(Ray r) {
         if (best.t < 0.) {
             return best;
         }
-        for (int i = -1; i < 1; i++) {
-            float u = float(i*2 + 1)/16. * 2. * PI;
-            best = updateBestApprox(best, findBestApprox(u, r, best));
-        }
+        best = updateBestApprox(best, findBestApprox(float(8 - 1)/16. * 2. * PI + PI, r, best));
+        best = updateBestApprox(best, findBestApprox(float(8 + 1)/16. * 2. * PI + PI, r, best));
     }
     return best;
 }
@@ -662,44 +660,6 @@ vec3 intersectScene(Ray r) {
         float current_t = 1e10;
         vec3 current_color = color(0.6, 0.6, 0.6);
 
-        if (intersect_mobius_sphere(r)) {
-            vec2 hit_best = get_best_init_value_ray(r);
-            current_t = 0.1;
-            if (hit_best.x > 0.) {
-                SearchResult best = SearchResult(-1., 0., 0.);
-                best = updateBestApprox(best, findBestApprox(hit_best.x, r, best));
-                best = updateBestApprox(best, findBestApprox(hit_best.y, r, best));
-                current_color = smoothRainbow(best.u / (2. * PI));
-                // current_color = smoothRainbow(hit_best.x / (2. * PI));
-            } else {
-                current_color = color(0., 0., 0.);
-            }
-        }
-
-        // SphereLineIntersection hits = intersect_sphere_line(Sphere(vec3(0.), 1.55), r);
-        // if (hits.is_some) {
-        //     ivec4 result = get_angles(hits.o, hits.od);
-        //     current_t = 0.1;
-        //     if (result.z == 0) {
-        //         current_color = color(1., 0., 0.);
-        //     } else if (result.z + 1 == texture_counti) {
-        //         current_color = color(0., 1., 0.);
-        //     } else if (result.w == 0) {
-        //         current_color = color(1., 0., 1.);
-        //     } else if (result.w + 1 == texture_counti) {
-        //         current_color = color(0., 1., 1.);
-        //     } else {
-        //         current_color = smoothRainbow(float(result.z + result.w) / (texture_count + texture_count));
-        //     }
-        // }
-
-        // SphereIntersect hits = intersectSphere(r);
-        // if (hits.hit && hits.t < current_t) {
-        //     // current_color = color(0.9, 0.9, 0.9);
-        //     // current_t = hits.t;
-        //     gray *= 0.4;
-        // }
-
         p.repr.pos.z = size;
         hitp = intersectPlane(r, p);
         if (hitp.hit && abs(hitp.u) < size && abs(hitp.v) < size && hitp.t < current_t) {
@@ -759,14 +719,6 @@ vec3 intersectScene(Ray r) {
         p.repr.pos = vec3(0., 0., 0.);
         p.repr.j = crdDefault.j;
         p.repr.k = crdDefault.k;
-
-        // MobiusIntersect hitmobius = intersectMobius2(Ray(mulCrd(first, r.o), mulDir(first, r.d)));
-        // if (hitmobius.hit && abs(hitmobius.v) < 1. && hitmobius.t < current_t) {
-        //     current_color = addNormalToColor(gridColor(color(0.6, 0.6, 0.6), vec2(hitmobius.u, hitmobius.v)), hitmobius.n, r.d);
-        //     current_t = hitmobius.t;
-        // }
-
-        return current_color * gray;
 
         MobiusIntersect hit = intersectMobius2(Ray(mulCrd(first, r.o), mulDir(first, r.d)));
         MobiusIntersect hit2 = intersectMobius2(Ray(mulCrd(second, r.o), mulDir(second, r.d)));
